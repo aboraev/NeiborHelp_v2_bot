@@ -13,8 +13,18 @@ from database import Database
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-MASTERS_GROUP_ID = int(os.getenv("MASTERS_GROUP_ID"))
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+MASTERS_GROUP_ID_STR = os.getenv("MASTERS_GROUP_ID")
+ADMIN_ID_STR = os.getenv("ADMIN_ID")
+
+if not BOT_TOKEN:
+    raise ValueError("❌ Переменная BOT_TOKEN не задана!")
+if not MASTERS_GROUP_ID_STR:
+    raise ValueError("❌ Переменная MASTERS_GROUP_ID не задана!")
+if not ADMIN_ID_STR:
+    raise ValueError("❌ Переменная ADMIN_ID не задана!")
+
+MASTERS_GROUP_ID = int(MASTERS_GROUP_ID_STR)
+ADMIN_ID = int(ADMIN_ID_STR)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -62,6 +72,37 @@ STATUS_EMOJI = {
 SPAM_WORDS = ["заработок", "крипто", "инвестиции", "казино", "бесплатно", "акция", "скидка", "перейди по ссылке", "заработай", "доход"]
 captcha_answers = {}
 
+# ========== МЕНЮ ==========
+
+def get_customer_menu():
+    """Меню для заказчика после любого действия"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Создать новую заявку", callback_data="need_help")],
+        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")],
+        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+    ])
+
+def get_master_menu():
+    """Меню для мастера после любого действия"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
+        [InlineKeyboardButton(text="🤝 Изменить категории", callback_data="can_help")],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")],
+        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+    ])
+
+def get_main_menu():
+    """Главное меню при старте"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Мне нужна помощь", callback_data="need_help")],
+        [InlineKeyboardButton(text="🤝 Я могу помочь", callback_data="can_help")],
+        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
+    ])
+
+# ========== КАПЧА И СТАРТ ==========
+
 def generate_captcha():
     a = random.randint(1, 10)
     b = random.randint(1, 10)
@@ -69,28 +110,6 @@ def generate_captcha():
     options = [correct - 1, correct, correct + 1]
     random.shuffle(options)
     return f"Сколько будет {a} + {b}?", correct, options
-
-def get_customer_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Создать новую заявку", callback_data="need_help")],
-        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
-
-def get_master_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
-        [InlineKeyboardButton(text="🤝 Изменить категории", callback_data="can_help")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
-
-def get_main_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Мне нужна помощь", callback_data="need_help")],
-        [InlineKeyboardButton(text="🤝 Я могу помочь", callback_data="can_help")],
-        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -134,6 +153,12 @@ async def process_captcha(callback: types.CallbackQuery, state: FSMContext):
 async def show_main_menu(message: types.Message, text="Что хотите сделать?"):
     await message.answer(text, reply_markup=get_main_menu())
 
+@dp.callback_query(F.data == "main_menu")
+async def back_to_main(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.delete()
+    await show_main_menu(callback.message, "Что хотите сделать?")
+
 @dp.callback_query(F.data == "info")
 async def show_info(callback: types.CallbackQuery):
     await callback.answer()
@@ -144,6 +169,8 @@ async def show_info(callback: types.CallbackQuery):
         "🛡️ <b>Безопасно:</b> ваши контакты передаются мастеру только после того, как он согласится помочь."
     )
     await callback.message.edit_text(text, reply_markup=get_customer_menu(), parse_mode="HTML")
+
+# ========== ЗАЯВКИ ПОЛЬЗОВАТЕЛЯ ==========
 
 @dp.message(Command("my"))
 async def cmd_my_requests(message: types.Message):
@@ -168,6 +195,8 @@ async def show_my_requests(message: types.Message, user_id: int):
         lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:60]}{'...' if len(text) > 60 else ''}{executor_info}\n")
     result_text = "\n".join(lines)
     await message.answer(result_text, reply_markup=get_customer_menu(), parse_mode="HTML")
+
+# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ ==========
 
 @dp.callback_query(F.data == "need_help")
 async def process_need_help(callback: types.CallbackQuery, state: FSMContext):
@@ -290,6 +319,8 @@ async def process_contact(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Произошла ошибка. Начните заново: /start", reply_markup=types.ReplyKeyboardRemove())
         await state.clear()
 
+# ========== МАСТЕР: ПРИНЯТИЕ ЗАКАЗА ==========
+
 @dp.callback_query(F.data.startswith("accept_"))
 async def process_accept(callback: types.CallbackQuery):
     await callback.answer()
@@ -320,7 +351,8 @@ async def process_accept(callback: types.CallbackQuery):
             f"Свяжитесь с ним для обсуждения деталей.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🟢 В работе", callback_data=f"progress_{request_id}")],
-                [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")]
+                [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")],
+                [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")]
             ])
         )
     except TelegramAPIError:
@@ -345,6 +377,8 @@ async def process_skip(callback: types.CallbackQuery):
         await callback.message.edit_text(new_text, reply_markup=callback.message.reply_markup)
     except TelegramAPIError:
         pass
+
+# ========== МАСТЕР: УПРАВЛЕНИЕ ЗАКАЗОМ ==========
 
 @dp.callback_query(F.data.startswith("progress_"))
 async def process_progress(callback: types.CallbackQuery):
@@ -483,6 +517,8 @@ async def process_rating(callback: types.CallbackQuery):
     
     await callback.message.edit_text("✅ Спасибо за оценку!", reply_markup=get_customer_menu())
 
+# ========== МАСТЕР: РЕГИСТРАЦИЯ ==========
+
 @dp.callback_query(F.data == "can_help")
 async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -551,6 +587,30 @@ async def finish_selection(callback: types.CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n⚠️ Ссылка не настроена. Попросите админа добавить вас.", reply_markup=get_master_menu())
     await state.clear()
+
+# ========== МАСТЕР: МОИ ЗАКАЗЫ ==========
+
+@dp.callback_query(F.data == "my_orders")
+async def my_orders(callback: types.CallbackQuery):
+    await callback.answer()
+    master_id = callback.from_user.id
+    requests = db.get_requests_by_master(master_id)
+    
+    if not requests:
+        await callback.message.edit_text("📭 У вас пока нет принятых заказов.", reply_markup=get_master_menu())
+        return
+    
+    lines = ["📋 <b>Ваши заказы:</b>\n"]
+    for req in requests:
+        req_id, text, category, status, _, _ = req
+        status_emoji = STATUS_EMOJI.get(status, "❓")
+        cat_name = CATEGORIES.get(category, category)
+        lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:50]}\n")
+    
+    result_text = "\n".join(lines)
+    await callback.message.edit_text(result_text, reply_markup=get_master_menu(), parse_mode="HTML")
+
+# ========== ЛОВУШКА ДЛЯ НЕИЗВЕСТНЫХ КНОПОК ==========
 
 @dp.callback_query()
 async def catch_all(callback: types.CallbackQuery):
