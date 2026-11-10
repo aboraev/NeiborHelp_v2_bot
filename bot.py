@@ -30,103 +30,18 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 db = Database()
 
-# ========== ДВУХУРОВНЕВАЯ СТРУКТУРА КАТЕГОРИЙ ==========
+# ========== КАТЕГОРИИ С ПОДРОБНЫМИ ОПИСАНИЯМИ ==========
 
-MAIN_CATEGORIES = {
-    "repair": {
-        "name": "🏠 Ремонт и строительство",
-        "subs": {
-            "plumbing": "🚿 Сантехника",
-            "electrical": "⚡ Электрика",
-            "painting": "🎨 Малярка и обои",
-            "tiling": "🔲 Плитка и полы",
-            "small_repair": "🔨 Мелкий ремонт"
-        }
-    },
-    "tech": {
-        "name": "🔧 Техника и электроника",
-        "subs": {
-            "computers": "💻 Компьютеры и ноутбуки",
-            "phones": "📱 Телефоны и планшеты",
-            "large_appliance": "🧺 Крупная бытовая техника",
-            "small_appliance": "🔌 Мелкая бытовая техника",
-            "tv_audio": "📺 ТВ и аудио"
-        }
-    },
-    "auto": {
-        "name": "🚗 Авто и транспорт",
-        "subs": {
-            "car_help": "🚙 Помощь с авто",
-            "delivery": "🚚 Перевозки и доставка",
-            "loading": "📦 Погрузка/разгрузка"
-        }
-    },
-    "home_services": {
-        "name": "🍳 Бытовые услуги",
-        "subs": {
-            "cleaning": "🧹 Уборка квартир",
-            "baking": "🥐 Выпечка и готовка",
-            "laundry": "👕 Стирка и глажка",
-            "shopping": "🛒 Поход в магазин/аптеку"
-        }
-    },
-    "consult": {
-        "name": "📚 Консультации и обучение",
-        "subs": {
-            "lawyer": "⚖️ Юридические консультации",
-            "accountant": "📊 Бухгалтерия и налоги",
-            "tutor": "🎓 Репетиторство",
-            "career": "💼 Карьерные консультации"
-        }
-    },
-    "it": {
-        "name": "💻 IT и цифровые услуги",
-        "subs": {
-            "websites": "🌐 Сайты и лендинги",
-            "bots": "🤖 Боты и автоматизация",
-            "phone_setup": "📱 Настройка смартфонов",
-            "pc_setup": "🖥️ Настройка компьютеров и ПО",
-            "wifi_smart_home": "📡 Настройка Wi-Fi и умного дома"
-        }
-    },
-    "pets": {
-        "name": "🐾 Животные и растения",
-        "subs": {
-            "dog_walking": "🐕 Выгул собак",
-            "pet_sitting": "🐱 Передержка животных",
-            "plants": "🌱 Полив растений",
-            "pet_grooming": "✂️ Стрижка животных"
-        }
-    },
-    "other": {
-        "name": "❓ Другое",
-        "subs": {
-            "other": "❓ Другое"
-        }
-    }
+CATEGORIES = {
+    "repair": "🏠 Ремонт (сантехника, электрика, малярка, плитка, мелкий ремонт)",
+    "tech": "🔧 Техника (компьютеры, телефоны, крупная и мелкая бытовая, ТВ)",
+    "auto": "🚗 Авто и транспорт (помощь с авто, перевозки, погрузка)",
+    "home_services": "🍳 Бытовые услуги (уборка, выпечка, стирка, поход в магазин)",
+    "consult": "📚 Консультации (юрист, бухгалтер, репетитор, карьера)",
+    "it": "💻 IT и цифровые услуги (сайты, боты, настройка ПК/телефонов, Wi-Fi)",
+    "pets": "🐾 Животные и растения (выгул, передержка, полив, стрижка)",
+    "other": "❓ Другое"
 }
-
-ALL_SUBS = {}
-for main_key, main_data in MAIN_CATEGORIES.items():
-    for sub_key, sub_name in main_data["subs"].items():
-        ALL_SUBS[sub_key] = sub_name
-
-# ========== СОСТОЯНИЯ ==========
-
-class NeedHelpStates(StatesGroup):
-    waiting_for_main = State()
-    waiting_for_sub = State()
-    waiting_for_text = State()
-    waiting_for_timing = State()
-    waiting_for_custom_time = State()
-    waiting_for_contact = State()
-
-class CanHelpStates(StatesGroup):
-    waiting_for_main = State()
-    waiting_for_subs = State()
-
-class MasterCancelStates(StatesGroup):
-    waiting_for_comment = State()
 
 STATUS_EMOJI = {
     "new": "🟡 Новая",
@@ -211,11 +126,6 @@ async def process_captcha(callback: types.CallbackQuery, state: FSMContext):
 async def show_main_menu(message: types.Message, text="Что хотите сделать?"):
     await message.answer(text, reply_markup=get_main_menu())
 
-@dp.callback_query(F.data == "main_menu")
-async def back_to_main(callback: types.CallbackQuery):
-    await callback.answer()
-    await show_main_menu(callback.message, "Что хотите сделать?")
-
 @dp.callback_query(F.data == "info")
 async def show_info(callback: types.CallbackQuery):
     await callback.answer()
@@ -247,7 +157,7 @@ async def show_my_requests(message: types.Message, user_id: int):
     for req in requests:
         req_id, text, category, status, executor, created_at = req
         status_emoji = STATUS_EMOJI.get(status, "❓ Неизвестно")
-        cat_name = ALL_SUBS.get(category, category)
+        cat_name = CATEGORIES.get(category, category)
         executor_info = f" | Исполнитель: @{executor}" if executor else ""
         lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:60]}{'...' if len(text) > 60 else ''}{executor_info}\n")
     result_text = "\n".join(lines)
@@ -258,51 +168,33 @@ async def show_my_requests(message: types.Message, user_id: int):
 @dp.callback_query(F.data == "need_help")
 async def process_need_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(NeedHelpStates.waiting_for_main)
+    await state.set_state(NeedHelpStates.waiting_for_category)
     
+    categories_list = list(CATEGORIES.items())
     keyboard_rows = []
-    for main_key, main_data in MAIN_CATEGORIES.items():
-        keyboard_rows.append([InlineKeyboardButton(text=main_data["name"], callback_data=f"main_{main_key}")])
+    for i in range(0, len(categories_list), 2):
+        row = [InlineKeyboardButton(text=categories_list[i][1], callback_data=f"cat_{categories_list[i][0]}")]
+        if i + 1 < len(categories_list):
+            row.append(InlineKeyboardButton(text=categories_list[i+1][1], callback_data=f"cat_{categories_list[i+1][0]}"))
+        keyboard_rows.append(row)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    await callback.message.edit_text("Выберите основное направление:", reply_markup=keyboard)
+    await callback.message.edit_text("Выберите категорию помощи:", reply_markup=keyboard)
 
-@dp.callback_query(F.data.startswith("main_"), NeedHelpStates.waiting_for_main)
-async def process_main_category(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    main_cat_key = callback.data.split("_", 1)[1]
-    await state.update_data(main_category=main_cat_key)
-    await state.set_state(NeedHelpStates.waiting_for_sub)
-    
-    subcats = MAIN_CATEGORIES[main_cat_key]["subs"]
-    keyboard_rows = []
-    for sub_key, sub_name in subcats.items():
-        keyboard_rows.append([InlineKeyboardButton(text=sub_name, callback_data=f"sub_{sub_key}")])
-    
-    keyboard_rows.append([InlineKeyboardButton(text="🔙 Назад к основным категориям", callback_data="back_to_main_cats")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    await callback.message.edit_text(f"Уточните категорию:\n\n📂 {MAIN_CATEGORIES[main_cat_key]['name']}", reply_markup=keyboard)
+class NeedHelpStates(StatesGroup):
+    waiting_for_category = State()
+    waiting_for_text = State()
+    waiting_for_timing = State()
+    waiting_for_custom_time = State()
+    waiting_for_contact = State()
 
-@dp.callback_query(F.data == "back_to_main_cats", NeedHelpStates.waiting_for_sub)
-async def back_to_main_cats(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("cat_"), NeedHelpStates.waiting_for_category)
+async def process_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(NeedHelpStates.waiting_for_main)
-    
-    keyboard_rows = []
-    for main_key, main_data in MAIN_CATEGORIES.items():
-        keyboard_rows.append([InlineKeyboardButton(text=main_data["name"], callback_data=f"main_{main_key}")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    await callback.message.edit_text("Выберите основное направление:", reply_markup=keyboard)
-
-@dp.callback_query(F.data.startswith("sub_"), NeedHelpStates.waiting_for_sub)
-async def process_subcategory(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    sub_cat_key = callback.data.split("_", 1)[1]
-    await state.update_data(category=sub_cat_key)
+    category = callback.data.split("_", 1)[1]
+    await state.update_data(category=category)
     await state.set_state(NeedHelpStates.waiting_for_text)
-    await callback.message.edit_text(f"Опишите задачу кратко (до 300 символов):\n\nКатегория: {ALL_SUBS[sub_cat_key]}")
+    await callback.message.edit_text(f"Опишите задачу кратко (до 300 символов):\n\nКатегория: {CATEGORIES[category]}")
 
 @dp.message(NeedHelpStates.waiting_for_text)
 async def process_text(message: types.Message, state: FSMContext):
@@ -376,7 +268,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         
         request_id = db.save_request(author_id, author_username, text, category)
         
-        group_message = f"🆕 Новая заявка №{request_id}\n\n📂 Категория: {ALL_SUBS[category]}\n⏳ Срочность: {timing}\n📝 Задача: {text}"
+        group_message = f"🆕 Новая заявка №{request_id}\n\n📂 Категория: {CATEGORIES[category]}\n⏳ Срочность: {timing}\n📝 Задача: {text}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Принять заказ", callback_data=f"accept_{request_id}")],
@@ -405,64 +297,141 @@ async def process_contact(message: types.Message, state: FSMContext):
 
 # ========== МАСТЕР: РЕГИСТРАЦИЯ ==========
 
+class CanHelpStates(StatesGroup):
+    waiting_for_categories = State()
+
 @dp.callback_query(F.data == "can_help")
 async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(CanHelpStates.waiting_for_main)
-    await state.update_data(selected_main=[])
-    await show_main_selection(callback.message, [])
+    await state.set_state(CanHelpStates.waiting_for_categories)
+    await state.update_data(selected_categories=[])
+    await update_categories_keyboard(callback.message, [])
 
-async def show_main_selection(message: types.Message, selected: list):
+async def update_categories_keyboard(message: types.Message, selected: list):
+    categories_list = list(CATEGORIES.items())
     keyboard_rows = []
-    for main_key, main_data in MAIN_CATEGORIES.items():
-        label = f"✅ {main_data['name']}" if main_key in selected else f"⬜ {main_data['name']}"
-        keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"toggle_main_{main_key}")])
-    
-    keyboard_rows.append([InlineKeyboardButton(text="➡️ Далее: выбрать подкатегории", callback_data="next_subs")])
+    for i in range(0, len(categories_list), 2):
+        row = []
+        for j in range(2):
+            idx = i + j
+            if idx < len(categories_list):
+                cat_key, cat_name = categories_list[idx]
+                label = f"✅ {cat_name}" if cat_key in selected else f"⬜ {cat_name}"
+                row.append(InlineKeyboardButton(text=label, callback_data=f"toggle_{cat_key}"))
+        keyboard_rows.append(row)
+    keyboard_rows.append([InlineKeyboardButton(text="✅ Готово", callback_data="finish_selection")])
     if selected:
-        keyboard_rows.append([InlineKeyboardButton(text="❌ Сбросить всё", callback_data="reset_main")])
-    
+        keyboard_rows.append([InlineKeyboardButton(text="❌ Сбросить всё", callback_data="reset_selection")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    selected_names = ", ".join([MAIN_CATEGORIES[c]["name"] for c in selected]) if selected else "ничего не выбрано"
-    text = f"Выберите основные направления (можно несколько):\n\n📌 Выбрано: {selected_names}"
-    
+    selected_names = ", ".join([CATEGORIES[c] for c in selected]) if selected else "ничего не выбрано"
+    text = f"Выберите категории помощи (можно несколько):\n\n📌 Выбрано: {selected_names}"
     try:
         await message.edit_text(text, reply_markup=keyboard)
     except TelegramAPIError as e:
         if "message is not modified" not in str(e).lower():
             print(f"Ошибка редактирования: {e}")
 
-@dp.callback_query(F.data.startswith("toggle_main_"), CanHelpStates.waiting_for_main)
-async def toggle_main(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("toggle_"), CanHelpStates.waiting_for_categories)
+async def toggle_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    category = callback.data.replace("toggle_main_", "")
+    category = callback.data.replace("toggle_", "")
     data = await state.get_data()
-    selected = data.get("selected_main", [])
+    selected = data.get("selected_categories", [])
     if category in selected:
         selected.remove(category)
     else:
         selected.append(category)
-    await state.update_data(selected_main=selected)
-    await show_main_selection(callback.message, selected)
+    await state.update_data(selected_categories=selected)
+    await update_categories_keyboard(callback.message, selected)
 
-@dp.callback_query(F.data == "reset_main", CanHelpStates.waiting_for_main)
-async def reset_main(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "reset_selection", CanHelpStates.waiting_for_categories)
+async def reset_selection(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(selected_main=[])
-    await show_main_selection(callback.message, [])
+    await state.update_data(selected_categories=[])
+    await update_categories_keyboard(callback.message, [])
 
-@dp.callback_query(F.data == "next_subs", CanHelpStates.waiting_for_main)
-async def next_subs(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "finish_selection", CanHelpStates.waiting_for_categories)
+async def finish_selection(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
-    selected_main = data.get("selected_main", [])
+    selected = data.get("selected_categories", [])
+    if not selected:
+        await callback.message.answer("⚠️ Выберите хотя бы одну категорию!", show_alert=True)
+        return
+    user_id = callback.from_user.id
+    username = callback.from_user.username or callback.from_user.first_name
+    db.save_user(user_id, username, "master", selected)
+    invite_link = os.getenv("GROUP_INVITE_LINK")
+    selected_names = ", ".join([CATEGORIES[c] for c in selected])
+    if invite_link:
+        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n👉 Вступите в группу мастеров:\n{invite_link}", reply_markup=get_master_menu())
+    else:
+        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n⚠️ Ссылка не настроена. Попросите админа добавить вас.", reply_markup=get_master_menu())
+    await state.clear()
+
+# ========== МАСТЕР: ПРИНЯТИЕ ЗАКАЗА ==========
+
+@dp.callback_query(F.data.startswith("accept_"))
+async def process_accept(callback: types.CallbackQuery):
+    await callback.answer()
+    request_id = int(callback.data.split("_")[1])
+    master_id = callback.from_user.id
+    master_username = callback.from_user.username or callback.from_user.first_name
     
-    if not selected_main:
-        await callback.message.answer("⚠️ Выберите хотя бы одно направление!", show_alert=True)
+    request = db.get_request(request_id)
+    if not request or request[5] != "new":
+        await callback.message.answer("Этот заказ уже принят", show_alert=True)
         return
     
-    await state.set_state(CanHelpStates.waiting_for_subs)
-    await state.update_data(selected_subs=[])
-    await show_sub_selection(callback.message, selected_main, [])
+    db.update_request_status(request_id, "accepted", master_id, master_username)
+    author_username = request[2]
+    
+    await callback.message.edit_text(
+        f"✅ Заказ №{request_id} принят мастером @{master_username}\n\n📂 Категория: {CATEGORIES[request[4]]}\n📝 Задача: {request[3]}",
+        reply_markup=None
+    )
+    
+    try:
+        await bot.send_message(
+            master_id,
+            f"📞 Вы приняли заказ №{request_id}.\n\n"
+            f"📂 Категория: {CATEGORIES[request[4]]}\n"
+            f"📝 Задача: {request[3]}\n\n"
+            f"👤 Контакт заказчика: @{author_username}\n\n"
+            f"Свяжитесь с ним для обсуждения деталей.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🟢 В работе", callback_data=f"progress_{request_id}")],
+                [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")],
+                [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")]
+            ])
+        )
+    except TelegramAPIError:
+        pass
+    
+    try:
+        await bot.send_message(request[1], f"🔔 Мастер откликнулся на вашу заявку №{request_id}. Ожидайте сообщения от него.")
+    except:
+        pass
 
-async def show_sub_sel
+@dp.callback_query(F.data.startswith("skip_"))
+async def process_skip(callback: types.CallbackQuery):
+    await callback.answer()
+    request_id = int(callback.data.split("_")[1])
+    master_username = callback.from_user.username or callback.from_user.first_name
+    current_text = callback.message.text
+    if "Пропущено:" in current_text:
+        new_text = current_text + f", @{master_username}"
+    else:
+        new_text = current_text + f"\n\n❌ Пропущено: @{master_username}"
+    try:
+        await callback.message.edit_text(new_text, reply_markup=callback.message.reply_markup)
+    except TelegramAPIError:
+        pass
+
+# ========== МАСТЕР: УПРАВЛЕНИЕ ЗАКАЗОМ ==========
+
+class MasterCancelStates(StatesGroup):
+    waiting_for_comment = State()
+
+@dp.callback_query(F.data.startswith("progress_"))
+async def process_progress(callback: types.
