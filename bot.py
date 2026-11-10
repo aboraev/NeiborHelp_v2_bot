@@ -106,7 +106,6 @@ MAIN_CATEGORIES = {
     }
 }
 
-# Плоский словарь для быстрого поиска
 ALL_SUBS = {}
 for main_key, main_data in MAIN_CATEGORIES.items():
     for sub_key, sub_name in main_data["subs"].items():
@@ -146,16 +145,14 @@ def get_customer_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Создать новую заявку", callback_data="need_help")],
         [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")],
-        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
     ])
 
 def get_master_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
         [InlineKeyboardButton(text="🤝 Изменить категории", callback_data="can_help")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")],
-        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
     ])
 
 def get_main_menu():
@@ -178,12 +175,9 @@ def generate_captcha():
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    if user_id in captcha_answers and captcha_answers[user_id] == "passed":
-        await show_main_menu(message)
-        return
+    # КАПЧА ВСЕГДА ПРИ /start
     question, correct, options = generate_captcha()
-    captcha_answers[user_id] = {"correct": correct, "attempts": 0}
+    captcha_answers[message.from_user.id] = {"correct": correct, "attempts": 0}
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=str(opt), callback_data=f"captcha_{opt}") for opt in options]
     ])
@@ -221,7 +215,7 @@ async def show_main_menu(message: types.Message, text="Что хотите сд�
 @dp.callback_query(F.data == "main_menu")
 async def back_to_main(callback: types.CallbackQuery):
     await callback.answer()
-    await callback.message.delete()
+    # ИСПРАВЛЕНО: отправляем новое сообщение вместо удаления
     await show_main_menu(callback.message, "Что хотите сделать?")
 
 @dp.callback_query(F.data == "info")
@@ -261,14 +255,13 @@ async def show_my_requests(message: types.Message, user_id: int):
     result_text = "\n".join(lines)
     await message.answer(result_text, reply_markup=get_customer_menu(), parse_mode="HTML")
 
-# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ (ДВУХУРОВНЕВОЕ) ==========
+# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ ==========
 
 @dp.callback_query(F.data == "need_help")
 async def process_need_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(NeedHelpStates.waiting_for_main)
     
-    # Основные категории в ОДИН столбец
     keyboard_rows = []
     for main_key, main_data in MAIN_CATEGORIES.items():
         keyboard_rows.append([InlineKeyboardButton(text=main_data["name"], callback_data=f"main_{main_key}")])
@@ -283,7 +276,6 @@ async def process_main_category(callback: types.CallbackQuery, state: FSMContext
     await state.update_data(main_category=main_cat_key)
     await state.set_state(NeedHelpStates.waiting_for_sub)
     
-    # Подкатегории в ОДИН столбец + кнопка Назад
     subcats = MAIN_CATEGORIES[main_cat_key]["subs"]
     keyboard_rows = []
     for sub_key, sub_name in subcats.items():
@@ -413,7 +405,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Произошла ошибка. Начните заново: /start", reply_markup=types.ReplyKeyboardRemove())
         await state.clear()
 
-# ========== МАСТЕР: РЕГИСТРАЦИЯ (ДВУХУРОВНЕВАЯ) ==========
+# ========== МАСТЕР: РЕГИСТРАЦИЯ ==========
 
 @dp.callback_query(F.data == "can_help")
 async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
@@ -423,7 +415,6 @@ async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
     await show_main_selection(callback.message, [])
 
 async def show_main_selection(message: types.Message, selected: list):
-    # Основные категории в ОДИН столбец
     keyboard_rows = []
     for main_key, main_data in MAIN_CATEGORIES.items():
         label = f"✅ {main_data['name']}" if main_key in selected else f"⬜ {main_data['name']}"
@@ -462,4 +453,16 @@ async def reset_main(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(selected_main=[])
     await show_main_selection(callback.message, [])
 
-@dp.callback_query(F.data == "next_subs", CanHelpStates.waiting_for
+@dp.callback_query(F.data == "next_subs", CanHelpStates.waiting_for_main)
+async def next_subs(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    selected_main = data.get("selected_main", [])
+    
+    if not selected_main:
+        await callback.message.answer("⚠️ Выберите хотя бы одно направление!", show_alert=True)
+        return
+    
+    await state.set_state(CanHelpStates.waiting_for_subs)
+    await state.update_data(selected_subs=[])
+    await show_sub_s
