@@ -30,36 +30,104 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 db = Database()
 
+# ========== ДВУХУРОВНЕВАЯ СТРУКТУРА КАТЕГОРИЙ ==========
+
+MAIN_CATEGORIES = {
+    "repair": {
+        "name": "🏠 Ремонт и строительство",
+        "subs": {
+            "plumbing": "🚿 Сантехника",
+            "electrical": "⚡ Электрика",
+            "painting": "🎨 Малярка и обои",
+            "tiling": "🔲 Плитка и полы",
+            "small_repair": "🔨 Мелкий ремонт"
+        }
+    },
+    "tech": {
+        "name": "🔧 Техника и электроника",
+        "subs": {
+            "computers": "💻 Компьютеры и ноутбуки",
+            "phones": "📱 Телефоны и планшеты",
+            "large_appliance": "🧺 Крупная бытовая техника",
+            "small_appliance": "🔌 Мелкая бытовая техника",
+            "tv_audio": "📺 ТВ и аудио"
+        }
+    },
+    "auto": {
+        "name": "🚗 Авто и транспорт",
+        "subs": {
+            "car_help": "🚙 Помощь с авто",
+            "delivery": "🚚 Перевозки и доставка",
+            "loading": "📦 Погрузка/разгрузка"
+        }
+    },
+    "home_services": {
+        "name": "🍳 Бытовые услуги",
+        "subs": {
+            "cleaning": "🧹 Уборка квартир",
+            "baking": "🥐 Выпечка и готовка",
+            "laundry": "👕 Стирка и глажка",
+            "shopping": "🛒 Поход в магазин/аптеку"
+        }
+    },
+    "consult": {
+        "name": "📚 Консультации и обучение",
+        "subs": {
+            "lawyer": "⚖️ Юридические консультации",
+            "accountant": "📊 Бухгалтерия и налоги",
+            "tutor": "🎓 Репетиторство",
+            "career": "💼 Карьерные консультации"
+        }
+    },
+    "it": {
+        "name": "💻 IT и цифровые услуги",
+        "subs": {
+            "websites": "🌐 Сайты и лендинги",
+            "bots": "🤖 Боты и автоматизация",
+            "phone_setup": "📱 Настройка смартфонов",
+            "pc_setup": "🖥️ Настройка компьютеров и ПО",
+            "wifi_smart_home": "📡 Настройка Wi-Fi и умного дома"
+        }
+    },
+    "pets": {
+        "name": "🐾 Животные и растения",
+        "subs": {
+            "dog_walking": "🐕 Выгул собак",
+            "pet_sitting": "🐱 Передержка животных",
+            "plants": "🌱 Полив растений",
+            "pet_grooming": "✂️ Стрижка животных"
+        }
+    },
+    "other": {
+        "name": "❓ Другое",
+        "subs": {
+            "other": "❓ Другое"
+        }
+    }
+}
+
+# Плоский словарь для быстрого поиска
+ALL_SUBS = {}
+for main_key, main_data in MAIN_CATEGORIES.items():
+    for sub_key, sub_name in main_data["subs"].items():
+        ALL_SUBS[sub_key] = sub_name
+
+# ========== СОСТОЯНИЯ ==========
+
 class NeedHelpStates(StatesGroup):
-    waiting_for_category = State()
+    waiting_for_main = State()
+    waiting_for_sub = State()
     waiting_for_text = State()
     waiting_for_timing = State()
     waiting_for_custom_time = State()
     waiting_for_contact = State()
 
 class CanHelpStates(StatesGroup):
-    waiting_for_categories = State()
+    waiting_for_main = State()
+    waiting_for_subs = State()
 
 class MasterCancelStates(StatesGroup):
     waiting_for_comment = State()
-
-CATEGORIES = {
-    "lawyer": "⚖️ Юрист",
-    "accountant": "📊 Бухгалтер",
-    "courier": "🚚 Курьер / Перевозка",
-    "baking": "🥐 Выпечка",
-    "plumbing": "🚿 Сантехника",
-    "electrical": "⚡ Электрика",
-    "large_appliance": "🧺 Ремонт крупной техники",
-    "small_appliance": "🔌 Ремонт мелкой техники",
-    "pc_repair": "💻 Ремонт ПК",
-    "tv_repair": "📺 Ремонт ТВ",
-    "renovation": "🏠 Ремонт квартиры",
-    "carpentry": "🪚 Столярные работы",
-    "auto": "🚗 Авто",
-    "smart_home": "🤖 Умный дом",
-    "dev": "🌐 Сайты / Боты / ПО"
-}
 
 STATUS_EMOJI = {
     "new": "🟡 Новая",
@@ -75,7 +143,6 @@ captcha_answers = {}
 # ========== МЕНЮ ==========
 
 def get_customer_menu():
-    """Меню для заказчика после любого действия"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Создать новую заявку", callback_data="need_help")],
         [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
@@ -84,7 +151,6 @@ def get_customer_menu():
     ])
 
 def get_master_menu():
-    """Меню для мастера после любого действия"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
         [InlineKeyboardButton(text="🤝 Изменить категории", callback_data="can_help")],
@@ -93,7 +159,6 @@ def get_master_menu():
     ])
 
 def get_main_menu():
-    """Главное меню при старте"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Мне нужна помощь", callback_data="need_help")],
         [InlineKeyboardButton(text="🤝 Я могу помочь", callback_data="can_help")],
@@ -190,35 +255,64 @@ async def show_my_requests(message: types.Message, user_id: int):
     for req in requests:
         req_id, text, category, status, executor, created_at = req
         status_emoji = STATUS_EMOJI.get(status, "❓ Неизвестно")
-        cat_name = CATEGORIES.get(category, category)
+        cat_name = ALL_SUBS.get(category, category)
         executor_info = f" | Исполнитель: @{executor}" if executor else ""
         lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:60]}{'...' if len(text) > 60 else ''}{executor_info}\n")
     result_text = "\n".join(lines)
     await message.answer(result_text, reply_markup=get_customer_menu(), parse_mode="HTML")
 
-# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ ==========
+# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ (ДВУХУРОВНЕВОЕ) ==========
 
 @dp.callback_query(F.data == "need_help")
 async def process_need_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(NeedHelpStates.waiting_for_category)
-    categories_list = list(CATEGORIES.items())
+    await state.set_state(NeedHelpStates.waiting_for_main)
+    
+    # Основные категории в ОДИН столбец
     keyboard_rows = []
-    for i in range(0, len(categories_list), 2):
-        row = [InlineKeyboardButton(text=categories_list[i][1], callback_data=f"cat_{categories_list[i][0]}")]
-        if i + 1 < len(categories_list):
-            row.append(InlineKeyboardButton(text=categories_list[i+1][1], callback_data=f"cat_{categories_list[i+1][0]}"))
-        keyboard_rows.append(row)
+    for main_key, main_data in MAIN_CATEGORIES.items():
+        keyboard_rows.append([InlineKeyboardButton(text=main_data["name"], callback_data=f"main_{main_key}")])
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    await callback.message.edit_text("Выберите категорию помощи:", reply_markup=keyboard)
+    await callback.message.edit_text("Выберите основное направление:", reply_markup=keyboard)
 
-@dp.callback_query(F.data.startswith("cat_"))
-async def process_category(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("main_"), NeedHelpStates.waiting_for_main)
+async def process_main_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    category = callback.data.split("_", 1)[1]
-    await state.update_data(category=category)
+    main_cat_key = callback.data.split("_", 1)[1]
+    await state.update_data(main_category=main_cat_key)
+    await state.set_state(NeedHelpStates.waiting_for_sub)
+    
+    # Подкатегории в ОДИН столбец + кнопка Назад
+    subcats = MAIN_CATEGORIES[main_cat_key]["subs"]
+    keyboard_rows = []
+    for sub_key, sub_name in subcats.items():
+        keyboard_rows.append([InlineKeyboardButton(text=sub_name, callback_data=f"sub_{sub_key}")])
+    
+    keyboard_rows.append([InlineKeyboardButton(text="🔙 Назад к основным категориям", callback_data="back_to_main_cats")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    await callback.message.edit_text(f"Уточните категорию:\n\n📂 {MAIN_CATEGORIES[main_cat_key]['name']}", reply_markup=keyboard)
+
+@dp.callback_query(F.data == "back_to_main_cats", NeedHelpStates.waiting_for_sub)
+async def back_to_main_cats(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(NeedHelpStates.waiting_for_main)
+    
+    keyboard_rows = []
+    for main_key, main_data in MAIN_CATEGORIES.items():
+        keyboard_rows.append([InlineKeyboardButton(text=main_data["name"], callback_data=f"main_{main_key}")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    await callback.message.edit_text("Выберите основное направление:", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("sub_"), NeedHelpStates.waiting_for_sub)
+async def process_subcategory(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    sub_cat_key = callback.data.split("_", 1)[1]
+    await state.update_data(category=sub_cat_key)
     await state.set_state(NeedHelpStates.waiting_for_text)
-    await callback.message.edit_text(f"Опишите задачу кратко (до 300 символов):\n\nКатегория: {CATEGORIES[category]}")
+    await callback.message.edit_text(f"Опишите задачу кратко (до 300 символов):\n\nКатегория: {ALL_SUBS[sub_cat_key]}")
 
 @dp.message(NeedHelpStates.waiting_for_text)
 async def process_text(message: types.Message, state: FSMContext):
@@ -292,7 +386,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         
         request_id = db.save_request(author_id, author_username, text, category)
         
-        group_message = f"🆕 Новая заявка №{request_id}\n\n📂 Категория: {CATEGORIES[category]}\n⏳ Срочность: {timing}\n📝 Задача: {text}"
+        group_message = f"🆕 Новая заявка №{request_id}\n\n📂 Категория: {ALL_SUBS[category]}\n⏳ Срочность: {timing}\n📝 Задача: {text}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Принять заказ", callback_data=f"accept_{request_id}")],
@@ -319,307 +413,53 @@ async def process_contact(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Произошла ошибка. Начните заново: /start", reply_markup=types.ReplyKeyboardRemove())
         await state.clear()
 
-# ========== МАСТЕР: ПРИНЯТИЕ ЗАКАЗА ==========
-
-@dp.callback_query(F.data.startswith("accept_"))
-async def process_accept(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_id = callback.from_user.id
-    master_username = callback.from_user.username or callback.from_user.first_name
-    
-    request = db.get_request(request_id)
-    if not request or request[5] != "new":
-        await callback.message.answer("Этот заказ уже принят", show_alert=True)
-        return
-    
-    db.update_request_status(request_id, "accepted", master_id, master_username)
-    author_username = request[2]
-    
-    await callback.message.edit_text(
-        f"✅ Заказ №{request_id} принят мастером @{master_username}\n\n📂 Категория: {CATEGORIES[request[4]]}\n📝 Задача: {request[3]}",
-        reply_markup=None
-    )
-    
-    try:
-        await bot.send_message(
-            master_id,
-            f"📞 Вы приняли заказ №{request_id}.\n\n"
-            f"📂 Категория: {CATEGORIES[request[4]]}\n"
-            f"📝 Задача: {request[3]}\n\n"
-            f"👤 Контакт заказчика: @{author_username}\n\n"
-            f"Свяжитесь с ним для обсуждения деталей.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🟢 В работе", callback_data=f"progress_{request_id}")],
-                [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")],
-                [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")]
-            ])
-        )
-    except TelegramAPIError:
-        pass
-    
-    try:
-        await bot.send_message(request[1], f"🔔 Мастер откликнулся на вашу заявку №{request_id}. Ожидайте сообщения от него.")
-    except:
-        pass
-
-@dp.callback_query(F.data.startswith("skip_"))
-async def process_skip(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_username = callback.from_user.username or callback.from_user.first_name
-    current_text = callback.message.text
-    if "Пропущено:" in current_text:
-        new_text = current_text + f", @{master_username}"
-    else:
-        new_text = current_text + f"\n\n❌ Пропущено: @{master_username}"
-    try:
-        await callback.message.edit_text(new_text, reply_markup=callback.message.reply_markup)
-    except TelegramAPIError:
-        pass
-
-# ========== МАСТЕР: УПРАВЛЕНИЕ ЗАКАЗОМ ==========
-
-@dp.callback_query(F.data.startswith("progress_"))
-async def process_progress(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_id = callback.from_user.id
-    
-    db.update_request_status(request_id, "in_progress", master_id)
-    request = db.get_request(request_id)
-    
-    try:
-        await bot.send_message(request[1], f"🔧 Мастер приступил к выполнению вашего заказа №{request_id}.")
-    except:
-        pass
-    
-    await callback.message.edit_text(
-        f"🟢 Заказ №{request_id} в работе.\n\n"
-        f"Когда закончите — нажмите «✅ Выполнено».",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выполнено", callback_data=f"done_{request_id}")],
-            [InlineKeyboardButton(text="🔴 Отказаться", callback_data=f"cancel_after_{request_id}")]
-        ])
-    )
-
-@dp.callback_query(F.data.startswith("cancel_after_"))
-async def process_cancel_after(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    
-    request = db.get_request(request_id)
-    if not request or request[6] != callback.from_user.id:
-        await callback.message.answer("Вы не принимали этот заказ", show_alert=True)
-        return
-    
-    await state.set_state(MasterCancelStates.waiting_for_comment)
-    await state.update_data(cancel_request_id=request_id)
-    
-    await callback.message.edit_text(
-        f"Вы хотите отказаться от заказа №{request_id}.\n\n"
-        f"Напишите причину отказа (или просто 'Отмена'):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Не отказываться", callback_data=f"cancel_cancel_{request_id}")]
-        ])
-    )
-
-@dp.callback_query(F.data.startswith("cancel_cancel_"))
-async def cancel_cancel(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.clear()
-    request_id = int(callback.data.split("_")[2])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🟢 В работе", callback_data=f"progress_{request_id}")],
-        [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")]
-    ])
-    
-    request = db.get_request(request_id)
-    await callback.message.edit_text(
-        f"📞 Вы приняли заказ №{request_id}.\n\n"
-        f"📂 Категория: {CATEGORIES[request[4]]}\n"
-        f"📝 Задача: {request[3]}\n\n"
-        f"👤 Контакт заказчика: @{request[2]}",
-        reply_markup=keyboard
-    )
-
-@dp.message(MasterCancelStates.waiting_for_comment)
-async def process_cancel_comment(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    request_id = data.get("cancel_request_id")
-    comment = message.text
-    
-    request = db.get_request(request_id)
-    if not request:
-        await message.answer("Заявка не найдена")
-        await state.clear()
-        return
-    
-    master_username = message.from_user.username or message.from_user.first_name
-    db.update_request_status(request_id, "new", None, None)
-    
-    group_message = f"🔄 Заявка №{request_id} снова доступна\n\n" \
-                    f"📂 Категория: {CATEGORIES[request[4]]}\n" \
-                    f"📝 Задача: {request[3]}\n\n" \
-                    f"❌ Отказ после диалога от @{master_username}\n" \
-                    f"💬 Комментарий: {comment}"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Принять заказ", callback_data=f"accept_{request_id}")],
-        [InlineKeyboardButton(text="❌ Пропустить", callback_data=f"skip_{request_id}")]
-    ])
-    
-    try:
-        await bot.send_message(MASTERS_GROUP_ID, group_message, reply_markup=keyboard)
-    except TelegramAPIError:
-        await message.answer("⚠️ Не удалось опубликовать заявку снова")
-        await state.clear()
-        return
-    
-    await message.answer("✅ Заявка снова доступна для других мастеров", reply_markup=get_master_menu())
-    await state.clear()
-
-@dp.callback_query(F.data.startswith("done_"))
-async def process_done(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_id = callback.from_user.id
-    
-    db.update_request_status(request_id, "done", master_id)
-    request = db.get_request(request_id)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👍 Отлично", callback_data=f"rate_5_{request_id}"),
-            InlineKeyboardButton(text="👎 Плохо", callback_data=f"rate_1_{request_id}")
-        ]
-    ])
-    
-    try:
-        await bot.send_message(request[1], f"✅ Заказ №{request_id} выполнен!\n\nОцените работу:", reply_markup=keyboard)
-    except:
-        pass
-    
-    await callback.message.edit_text(f"✅ Заказ №{request_id} выполнен!", reply_markup=get_master_menu())
-
-@dp.callback_query(F.data.startswith("rate_"))
-async def process_rating(callback: types.CallbackQuery):
-    await callback.answer()
-    parts = callback.data.split("_")
-    rating = int(parts[1])
-    request_id = int(parts[2])
-    
-    request = db.get_request(request_id)
-    executor_id = request[6]
-    
-    db.update_rating(executor_id, rating)
-    
-    await callback.message.edit_text("✅ Спасибо за оценку!", reply_markup=get_customer_menu())
-
-# ========== МАСТЕР: РЕГИСТРАЦИЯ ==========
+# ========== МАСТЕР: РЕГИСТРАЦИЯ (ДВУХУРОВНЕВАЯ) ==========
 
 @dp.callback_query(F.data == "can_help")
 async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(CanHelpStates.waiting_for_categories)
-    await state.update_data(selected_categories=[])
-    await update_categories_keyboard(callback.message, [])
+    await state.set_state(CanHelpStates.waiting_for_main)
+    await state.update_data(selected_main=[])
+    await show_main_selection(callback.message, [])
 
-async def update_categories_keyboard(message: types.Message, selected: list):
-    categories_list = list(CATEGORIES.items())
+async def show_main_selection(message: types.Message, selected: list):
+    # Основные категории в ОДИН столбец
     keyboard_rows = []
-    for i in range(0, len(categories_list), 2):
-        row = []
-        for j in range(2):
-            idx = i + j
-            if idx < len(categories_list):
-                cat_key, cat_name = categories_list[idx]
-                label = f"✅ {cat_name}" if cat_key in selected else f"⬜ {cat_name}"
-                row.append(InlineKeyboardButton(text=label, callback_data=f"toggle_{cat_key}"))
-        keyboard_rows.append(row)
-    keyboard_rows.append([InlineKeyboardButton(text="✅ Готово", callback_data="finish_selection")])
+    for main_key, main_data in MAIN_CATEGORIES.items():
+        label = f"✅ {main_data['name']}" if main_key in selected else f"⬜ {main_data['name']}"
+        keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"toggle_main_{main_key}")])
+    
+    keyboard_rows.append([InlineKeyboardButton(text="➡️ Далее: выбрать подкатегории", callback_data="next_subs")])
     if selected:
-        keyboard_rows.append([InlineKeyboardButton(text="❌ Сбросить всё", callback_data="reset_selection")])
+        keyboard_rows.append([InlineKeyboardButton(text="❌ Сбросить всё", callback_data="reset_main")])
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    selected_names = ", ".join([CATEGORIES[c] for c in selected]) if selected else "ничего не выбрано"
-    text = f"Выберите категории помощи (можно несколько):\n\n📌 Выбрано: {selected_names}"
+    selected_names = ", ".join([MAIN_CATEGORIES[c]["name"] for c in selected]) if selected else "ничего не выбрано"
+    text = f"Выберите основные направления (можно несколько):\n\n📌 Выбрано: {selected_names}"
+    
     try:
         await message.edit_text(text, reply_markup=keyboard)
     except TelegramAPIError as e:
         if "message is not modified" not in str(e).lower():
             print(f"Ошибка редактирования: {e}")
 
-@dp.callback_query(F.data.startswith("toggle_"), CanHelpStates.waiting_for_categories)
-async def toggle_category(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("toggle_main_"), CanHelpStates.waiting_for_main)
+async def toggle_main(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    category = callback.data.replace("toggle_", "")
+    category = callback.data.replace("toggle_main_", "")
     data = await state.get_data()
-    selected = data.get("selected_categories", [])
+    selected = data.get("selected_main", [])
     if category in selected:
         selected.remove(category)
     else:
         selected.append(category)
-    await state.update_data(selected_categories=selected)
-    await update_categories_keyboard(callback.message, selected)
+    await state.update_data(selected_main=selected)
+    await show_main_selection(callback.message, selected)
 
-@dp.callback_query(F.data == "reset_selection", CanHelpStates.waiting_for_categories)
-async def reset_selection(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "reset_main", CanHelpStates.waiting_for_main)
+async def reset_main(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(selected_categories=[])
-    await update_categories_keyboard(callback.message, [])
+    await state.update_data(selected_main=[])
+    await show_main_selection(callback.message, [])
 
-@dp.callback_query(F.data == "finish_selection", CanHelpStates.waiting_for_categories)
-async def finish_selection(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    data = await state.get_data()
-    selected = data.get("selected_categories", [])
-    if not selected:
-        await callback.message.answer("⚠️ Выберите хотя бы одну категорию!", show_alert=True)
-        return
-    user_id = callback.from_user.id
-    username = callback.from_user.username or callback.from_user.first_name
-    db.save_user(user_id, username, "master", selected)
-    invite_link = os.getenv("GROUP_INVITE_LINK")
-    selected_names = ", ".join([CATEGORIES[c] for c in selected])
-    if invite_link:
-        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n👉 Вступите в группу мастеров:\n{invite_link}", reply_markup=get_master_menu())
-    else:
-        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n⚠️ Ссылка не настроена. Попросите админа добавить вас.", reply_markup=get_master_menu())
-    await state.clear()
-
-# ========== МАСТЕР: МОИ ЗАКАЗЫ ==========
-
-@dp.callback_query(F.data == "my_orders")
-async def my_orders(callback: types.CallbackQuery):
-    await callback.answer()
-    master_id = callback.from_user.id
-    requests = db.get_requests_by_master(master_id)
-    
-    if not requests:
-        await callback.message.edit_text("📭 У вас пока нет принятых заказов.", reply_markup=get_master_menu())
-        return
-    
-    lines = ["📋 <b>Ваши заказы:</b>\n"]
-    for req in requests:
-        req_id, text, category, status, _, _ = req
-        status_emoji = STATUS_EMOJI.get(status, "❓")
-        cat_name = CATEGORIES.get(category, category)
-        lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:50]}\n")
-    
-    result_text = "\n".join(lines)
-    await callback.message.edit_text(result_text, reply_markup=get_master_menu(), parse_mode="HTML")
-
-# ========== ЛОВУШКА ДЛЯ НЕИЗВЕСТНЫХ КНОПОК ==========
-
-@dp.callback_query()
-async def catch_all(callback: types.CallbackQuery):
-    await callback.answer("Кнопка неактивна", show_alert=True)
-
-async def main():
-    print("Бот запущен...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@dp.callback_query(F.data == "next_subs", CanHelpStates.waiting_for
