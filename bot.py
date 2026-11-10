@@ -175,7 +175,6 @@ def generate_captcha():
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    # КАПЧА ВСЕГДА ПРИ /start
     question, correct, options = generate_captcha()
     captcha_answers[message.from_user.id] = {"correct": correct, "attempts": 0}
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -194,7 +193,7 @@ async def process_captcha(callback: types.CallbackQuery, state: FSMContext):
     correct = captcha_answers[user_id]["correct"]
     if answer == correct:
         captcha_answers[user_id] = "passed"
-        await callback.message.delete()
+        await callback.message.edit_text("✅ Капча пройдена!")
         await show_main_menu(callback.message)
     else:
         captcha_answers[user_id]["attempts"] += 1
@@ -215,7 +214,6 @@ async def show_main_menu(message: types.Message, text="Что хотите сд�
 @dp.callback_query(F.data == "main_menu")
 async def back_to_main(callback: types.CallbackQuery):
     await callback.answer()
-    # ИСПРАВЛЕНО: отправляем новое сообщение вместо удаления
     await show_main_menu(callback.message, "Что хотите сделать?")
 
 @dp.callback_query(F.data == "info")
@@ -465,4 +463,6 @@ async def next_subs(callback: types.CallbackQuery, state: FSMContext):
     
     await state.set_state(CanHelpStates.waiting_for_subs)
     await state.update_data(selected_subs=[])
-    await show_sub_s
+    await show_sub_selection(callback.message, selected_main, [])
+
+async def show_sub_sel
