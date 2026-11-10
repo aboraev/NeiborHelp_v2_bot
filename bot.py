@@ -1,84 +1,76 @@
 import os
 import random
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.exceptions import TelegramAPIError
+import telebot
+from telebot import types
 from dotenv import load_dotenv
 from database import Database
 
-load_dotenv()
+load_dotenv('/data/data/com.termux/files/home/.env')
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-MASTERS_GROUP_ID_STR = os.getenv("MASTERS_GROUP_ID")
-ADMIN_ID_STR = os.getenv("ADMIN_ID")
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+MASTERS_GROUP_ID_STR = os.getenv('MASTERS_GROUP_ID')
+ADMIN_ID_STR = os.getenv('ADMIN_ID')
 
-if not BOT_TOKEN:
-    raise ValueError("❌ Переменная BOT_TOKEN не задана!")
-if not MASTERS_GROUP_ID_STR:
-    raise ValueError("❌ Переменная MASTERS_GROUP_ID не задана!")
-if not ADMIN_ID_STR:
-    raise ValueError("❌ Переменная ADMIN_ID не задана!")
+if not BOT_TOKEN or not MASTERS_GROUP_ID_STR or not ADMIN_ID_STR:
+    print('Ошибка: проверьте переменные в .env!')
+    exit()
 
 MASTERS_GROUP_ID = int(MASTERS_GROUP_ID_STR)
 ADMIN_ID = int(ADMIN_ID_STR)
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+bot = telebot.TeleBot(BOT_TOKEN)
 db = Database()
 
-# ========== КАТЕГОРИИ С ПОДРОБНЫМИ ОПИСАНИЯМИ ==========
-
 CATEGORIES = {
-    "repair": "🏠 Ремонт (сантехника, электрика, малярка, плитка, мелкий ремонт)",
-    "tech": "🔧 Техника (компьютеры, телефоны, крупная и мелкая бытовая, ТВ)",
-    "auto": "🚗 Авто и транспорт (помощь с авто, перевозки, погрузка)",
-    "home_services": "🍳 Бытовые услуги (уборка, выпечка, стирка, поход в магазин)",
-    "consult": "📚 Консультации (юрист, бухгалтер, репетитор, карьера)",
-    "it": "💻 IT и цифровые услуги (сайты, боты, настройка ПК/телефонов, Wi-Fi)",
-    "pets": "🐾 Животные и растения (выгул, передержка, полив, стрижка)",
-    "other": "❓ Другое"
+    'repair': 'Ремонт (сантехника, электрика, малярка, плитка)',
+    'tech': 'Техника (компьютеры, телефоны, бытовая техника, ТВ)',
+    'auto': 'Авто и транспорт (помощь с авто, перевозки, погрузка)',
+    'home_services': 'Бытовые услуги (уборка, выпечка, стирка, магазин)',
+    'consult': 'Консультации (юрист, бухгалтер, репетитор, карьера)',
+    'it': 'IT услуги (сайты, боты, настройка ПК, Wi-Fi)',
+    'pets': 'Животные и растения (выгул, передержка, полив)',
+    'other': 'Другое'
 }
 
 STATUS_EMOJI = {
-    "new": "🟡 Новая",
-    "accepted": "🔵 Принята",
-    "in_progress": "🟢 В работе",
-    "done": "✅ Выполнена",
-    "cancelled": "🔴 Отменена"
+    'new': 'Новая',
+    'accepted': 'Принята',
+    'in_progress': 'В работе',
+    'done': 'Выполнена',
+    'cancelled': 'Отменена'
 }
 
-SPAM_WORDS = ["заработок", "крипто", "инвестиции", "казино", "бесплатно", "акция", "скидка", "перейди по ссылке", "заработай", "доход"]
+SPAM_WORDS = ['заработок', 'крипто', 'инвестиции', 'казино', 'бесплатно', 'акция', 'скидка', 'заработай', 'доход']
 captcha_answers = {}
-
-# ========== МЕНЮ ==========
+user_states = {}
 
 def get_customer_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Создать новую заявку", callback_data="need_help")],
-        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton('Создать заявку', callback_data='need_help'),
+        types.InlineKeyboardButton('Мои заявки', callback_data='my_requests'),
+        types.InlineKeyboardButton('Как это работает', callback_data='info')
+    )
+    return markup
 
 def get_master_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
-        [InlineKeyboardButton(text="🤝 Изменить категории", callback_data="can_help")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton('Мои заказы', callback_data='my_orders'),
+        types.InlineKeyboardButton('Изменить категории', callback_data='can_help'),
+        types.InlineKeyboardButton('Как это работает', callback_data='info')
+    )
+    return markup
 
 def get_main_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Мне нужна помощь", callback_data="need_help")],
-        [InlineKeyboardButton(text="🤝 Я могу помочь", callback_data="can_help")],
-        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="info")]
-    ])
-
-# ========== КАПЧА И СТАРТ ==========
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton('Мне нужна помощь', callback_data='need_help'),
+        types.InlineKeyboardButton('Я могу помочь', callback_data='can_help'),
+        types.InlineKeyboardButton('Мои заявки', callback_data='my_requests'),
+        types.InlineKeyboardButton('Как это работает', callback_data='info')
+    )
+    return markup
 
 def generate_captcha():
     a = random.randint(1, 10)
@@ -86,352 +78,478 @@ def generate_captcha():
     correct = a + b
     options = [correct - 1, correct, correct + 1]
     random.shuffle(options)
-    return f"Сколько будет {a} + {b}?", correct, options
+    question = 'Сколько будет ' + str(a) + ' + ' + str(b) + '?'
+    return question, correct, options
 
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message, state: FSMContext):
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    user_id = message.from_user.id
     question, correct, options = generate_captcha()
-    captcha_answers[message.from_user.id] = {"correct": correct, "attempts": 0}
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=str(opt), callback_data=f"captcha_{opt}") for opt in options]
-    ])
-    await message.answer(f"👋 Привет! Чтобы защитить чат от спама, подтверди, что ты не бот.\n\n{question}", reply_markup=keyboard)
+    captcha_answers[user_id] = {'correct': correct, 'attempts': 0}
+    markup = types.InlineKeyboardMarkup()
+    for opt in options:
+        markup.add(types.InlineKeyboardButton(text=str(opt), callback_data='captcha_' + str(opt)))
+    text = 'Привет! Подтверди, что ты не бот.\n\n' + question
+    bot.send_message(message.chat.id, text, reply_markup=markup)
 
-@dp.callback_query(F.data.startswith("captcha_"))
-async def process_captcha(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    user_id = callback.from_user.id
-    answer = int(callback.data.split("_")[1])
+@bot.callback_query_handler(func=lambda call: call.data.startswith('captcha_'))
+def process_captcha(call):
+    user_id = call.from_user.id
+    answer = int(call.data.split('_')[1])
     if user_id not in captcha_answers:
-        await callback.message.answer("Капча устарела, начните заново /start")
+        bot.send_message(call.message.chat.id, 'Капча устарела, напишите /start')
         return
-    correct = captcha_answers[user_id]["correct"]
+    correct = captcha_answers[user_id]['correct']
     if answer == correct:
-        captcha_answers[user_id] = "passed"
-        await callback.message.edit_text("✅ Капча пройдена!")
-        await show_main_menu(callback.message)
+        captcha_answers[user_id] = 'passed'
+        bot.edit_message_text('Капча пройдена!', call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id, 'Что хотите сделать?', reply_markup=get_main_menu())
     else:
-        captcha_answers[user_id]["attempts"] += 1
-        if captcha_answers[user_id]["attempts"] >= 3:
-            await callback.message.answer("❌ Слишком много попыток. Попробуйте позже.")
+        captcha_answers[user_id]['attempts'] += 1
+        if captcha_answers[user_id]['attempts'] >= 3:
+            bot.send_message(call.message.chat.id, 'Слишком много попыток. Попробуйте позже.')
             captcha_answers.pop(user_id, None)
         else:
-            question, correct, options = generate_captcha()
-            captcha_answers[user_id]["correct"] = correct
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=str(opt), callback_data=f"captcha_{opt}") for opt in options]
-            ])
-            await callback.message.edit_text(f"Неверно. Попробуйте ещё раз:\n\n{question}", reply_markup=keyboard)
+            q, c, opts = generate_captcha()
+            captcha_answers[user_id]['correct'] = c
+            markup = types.InlineKeyboardMarkup()
+            for o in opts:
+                markup.add(types.InlineKeyboardButton(text=str(o), callback_data='captcha_' + str(o)))
+            text = 'Неверно. Ещё раз:\n\n' + q
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-async def show_main_menu(message: types.Message, text="Что хотите сделать?"):
-    await message.answer(text, reply_markup=get_main_menu())
+@bot.callback_query_handler(func=lambda call: call.data == 'info')
+def show_info(call):
+    text = 'Привет, сосед!\n\nЭто бот взаимопомощи нашего дома.\n\nНикаких комиссий. Вы договариваетесь напрямую.'
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
 
-@dp.callback_query(F.data == "info")
-async def show_info(callback: types.CallbackQuery):
-    await callback.answer()
-    text = (
-        "👋 <b>Привет, сосед!</b>\n\n"
-        "Это бот взаимопомощи нашего дома. Мы просто связываем тех, кому нужна помощь, с теми, кто может её оказать.\n\n"
-        "🤝 <b>Никаких комиссий</b>, скрытых платежей или посредников. Вы договариваетесь об условиях и цене напрямую.\n\n"
-        "🛡️ <b>Безопасно:</b> ваши контакты передаются мастеру только после того, как он согласится помочь."
-    )
-    await callback.message.edit_text(text, reply_markup=get_customer_menu(), parse_mode="HTML")
+@bot.message_handler(commands=['my'])
+def cmd_my(message):
+    show_my_requests(message, message.from_user.id)
 
-# ========== ЗАЯВКИ ПОЛЬЗОВАТЕЛЯ ==========
+@bot.callback_query_handler(func=lambda call: call.data == 'my_requests')
+def cb_my_requests(call):
+    show_my_requests(call.message, call.from_user.id)
 
-@dp.message(Command("my"))
-async def cmd_my_requests(message: types.Message):
-    await show_my_requests(message, message.from_user.id)
-
-@dp.callback_query(F.data == "my_requests")
-async def callback_my_requests(callback: types.CallbackQuery):
-    await callback.answer()
-    await show_my_requests(callback.message, callback.from_user.id)
-
-async def show_my_requests(message: types.Message, user_id: int):
+def show_my_requests(message, user_id):
     requests = db.get_requests_by_user(user_id)
     if not requests:
-        await message.answer("📭 У вас пока нет заявок.", reply_markup=get_customer_menu())
+        bot.send_message(message.chat.id, 'У вас пока нет заявок.', reply_markup=get_customer_menu())
         return
-    lines = ["📋 <b>Ваши заявки:</b>\n"]
+    lines = ['Ваши заявки:\n']
     for req in requests:
-        req_id, text, category, status, executor, created_at = req
-        status_emoji = STATUS_EMOJI.get(status, "❓ Неизвестно")
+        req_id = req[0]
+        text = req[1]
+        category = req[2]
+        status = req[3]
+        executor = req[4]
+        status_emoji = STATUS_EMOJI.get(status, '?')
         cat_name = CATEGORIES.get(category, category)
-        executor_info = f" | Исполнитель: @{executor}" if executor else ""
-        lines.append(f"• №{req_id} {status_emoji}\n  📂 {cat_name}\n  📝 {text[:60]}{'...' if len(text) > 60 else ''}{executor_info}\n")
-    result_text = "\n".join(lines)
-    await message.answer(result_text, reply_markup=get_customer_menu(), parse_mode="HTML")
+        exec_info = ' | @' + str(executor) if executor else ''
+        if len(text) > 50:
+            short_text = text[:50] + '...'
+        else:
+            short_text = text
+        lines.append('N' + str(req_id) + ' ' + status_emoji)
+        lines.append('  ' + cat_name)
+        lines.append('  ' + short_text + exec_info)
+        lines.append('')
+    result = '\n'.join(lines)
+    bot.send_message(message.chat.id, result, reply_markup=get_customer_menu())
 
-# ========== ЗАКАЗЧИК: СОЗДАНИЕ ЗАЯВКИ ==========
+@bot.callback_query_handler(func=lambda call: call.data == 'need_help')
+def process_need_help(call):
+    user_states[call.from_user.id] = {'state': 'waiting_for_category'}
+    markup = types.InlineKeyboardMarkup()
+    for key, name in CATEGORIES.items():
+        markup.add(types.InlineKeyboardButton(text=name, callback_data='cat_' + key))
+    bot.edit_message_text('Выберите категорию:', call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-@dp.callback_query(F.data == "need_help")
-async def process_need_help(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.set_state(NeedHelpStates.waiting_for_category)
-    
-    categories_list = list(CATEGORIES.items())
-    keyboard_rows = []
-    for i in range(0, len(categories_list), 2):
-        row = [InlineKeyboardButton(text=categories_list[i][1], callback_data=f"cat_{categories_list[i][0]}")]
-        if i + 1 < len(categories_list):
-            row.append(InlineKeyboardButton(text=categories_list[i+1][1], callback_data=f"cat_{categories_list[i+1][0]}"))
-        keyboard_rows.append(row)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    await callback.message.edit_text("Выберите категорию помощи:", reply_markup=keyboard)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
+def process_category(call):
+    user_id = call.from_user.id
+    if user_states.get(user_id, {}).get('state') != 'waiting_for_category':
+        return
+    category = call.data.split('_', 1)[1]
+    user_states[user_id] = {'state': 'waiting_for_text', 'category': category}
+    cat_name = CATEGORIES.get(category, category)
+    text = 'Опишите задачу (до 300 символов):\n\nКатегория: ' + cat_name
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
 
-class NeedHelpStates(StatesGroup):
-    waiting_for_category = State()
-    waiting_for_text = State()
-    waiting_for_timing = State()
-    waiting_for_custom_time = State()
-    waiting_for_contact = State()
-
-@dp.callback_query(F.data.startswith("cat_"), NeedHelpStates.waiting_for_category)
-async def process_category(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    category = callback.data.split("_", 1)[1]
-    await state.update_data(category=category)
-    await state.set_state(NeedHelpStates.waiting_for_text)
-    await callback.message.edit_text(f"Опишите задачу кратко (до 300 символов):\n\nКатегория: {CATEGORIES[category]}")
-
-@dp.message(NeedHelpStates.waiting_for_text)
-async def process_text(message: types.Message, state: FSMContext):
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_text')
+def process_text(message):
     text = message.text
     if len(text) > 300:
-        await message.answer("⚠️ Сообщение слишком длинное. Сократите до 300 символов.")
+        bot.send_message(message.chat.id, 'Слишком длинно. Сократите до 300 символов.')
         return
-    if "http" in text.lower() or any(word in text.lower() for word in SPAM_WORDS):
-        await message.answer("⚠️ Сообщение отклонено системой защиты от спама.")
+    if 'http' in text.lower():
+        bot.send_message(message.chat.id, 'Сообщение отклонено (ссылки запрещены).')
         return
-    await state.update_data(text=text)
-    await state.set_state(NeedHelpStates.waiting_for_timing)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 Срочно", callback_data="time_urgent")],
-        [InlineKeyboardButton(text="🗓️ Укажу дату и время", callback_data="time_custom")],
-        [InlineKeyboardButton(text="🤝 Обговорю с соседом", callback_data="time_discuss")]
-    ])
-    await message.answer("⏳ Когда нужно выполнить задачу?", reply_markup=keyboard)
+    for word in SPAM_WORDS:
+        if word in text.lower():
+            bot.send_message(message.chat.id, 'Сообщение отклонено (похоже на спам).')
+            return
+    user_states[message.from_user.id]['text'] = text
+    user_states[message.from_user.id]['state'] = 'waiting_for_timing'
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Срочно', callback_data='time_urgent'),
+        types.InlineKeyboardButton('Укажу дату и время', callback_data='time_custom'),
+        types.InlineKeyboardButton('Обговорю с соседом', callback_data='time_discuss')
+    )
+    bot.send_message(message.chat.id, 'Когда нужно выполнить задачу?', reply_markup=markup)
 
-@dp.callback_query(F.data == "time_urgent", NeedHelpStates.waiting_for_timing)
-async def process_timing_urgent(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.update_data(timing="🔥 Срочно")
-    await state.set_state(NeedHelpStates.waiting_for_contact)
-    await ask_for_contact(callback.message)
+@bot.callback_query_handler(func=lambda call: call.data in ['time_urgent', 'time_discuss', 'time_custom'])
+def process_timing(call):
+    user_id = call.from_user.id
+    if user_states.get(user_id, {}).get('state') != 'waiting_for_timing':
+        return
+    if call.data == 'time_urgent':
+        user_states[user_id]['timing'] = 'Срочно'
+        user_states[user_id]['state'] = 'waiting_for_contact'
+        ask_for_contact(call.message)
+    elif call.data == 'time_discuss':
+        user_states[user_id]['timing'] = 'Обговорю с соседом'
+        user_states[user_id]['state'] = 'waiting_for_contact'
+        ask_for_contact(call.message)
+    else:
+        user_states[user_id]['state'] = 'waiting_for_custom_time'
+        bot.edit_message_text('Напишите дату и время (например: завтра в 18:00):', call.message.chat.id, call.message.message_id)
 
-@dp.callback_query(F.data == "time_discuss", NeedHelpStates.waiting_for_timing)
-async def process_timing_discuss(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.update_data(timing="🤝 Обговорю с соседом")
-    await state.set_state(NeedHelpStates.waiting_for_contact)
-    await ask_for_contact(callback.message)
-
-@dp.callback_query(F.data == "time_custom", NeedHelpStates.waiting_for_timing)
-async def process_timing_custom(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.set_state(NeedHelpStates.waiting_for_custom_time)
-    await callback.message.edit_text("Напишите удобную дату и время (например: завтра после 18:00 или 15 ноября в 14:00).")
-
-@dp.message(NeedHelpStates.waiting_for_custom_time)
-async def process_custom_time(message: types.Message, state: FSMContext):
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_custom_time')
+def process_custom_time(message):
     timing = message.text
     if len(timing) > 50:
-        await message.answer("⚠️ Слишком длинно. Напишите короче, например: 'завтра в 18:00'.")
+        bot.send_message(message.chat.id, 'Слишком длинно. Напишите короче.')
         return
-    await state.update_data(timing=timing)
-    await state.set_state(NeedHelpStates.waiting_for_contact)
-    await ask_for_contact(message)
+    user_states[message.from_user.id]['timing'] = timing
+    user_states[message.from_user.id]['state'] = 'waiting_for_contact'
+    ask_for_contact(message)
 
-async def ask_for_contact(message: types.Message):
-    keyboard = types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="📱 Поделиться контактом", request_contact=True)]],
-        resize_keyboard=True, one_time_keyboard=True
+def ask_for_contact(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton('Поделиться контактом', request_contact=True))
+    bot.send_message(message.chat.id, 'Поделитесь контактом Telegram:', reply_markup=markup)
+
+@bot.message_handler(content_types=['contact'])
+def process_contact(message):
+    user_id = message.from_user.id
+    state = user_states.get(user_id, {})
+    if state.get('state') != 'waiting_for_contact':
+        return
+    category = state.get('category')
+    text = state.get('text')
+    timing = state.get('timing', 'Не указано')
+    if not category or not text:
+        bot.send_message(message.chat.id, 'Ошибка. Напишите /start')
+        user_states.pop(user_id, None)
+        return
+    request_id = db.save_request(user_id, message.from_user.username or message.from_user.first_name, text, category)
+    cat_name = CATEGORIES.get(category, category)
+    group_msg = 'Новая заявка N' + str(request_id) + '\n\nКатегория: ' + cat_name + '\nСрочность: ' + timing + '\nЗадача: ' + text
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
+        types.InlineKeyboardButton('Пропустить', callback_data='skip_' + str(request_id))
     )
-    await message.answer("Поделитесь контактом Telegram, чтобы мастер мог с вами связаться:", reply_markup=keyboard)
-
-@dp.message(NeedHelpStates.waiting_for_contact, F.contact)
-async def process_contact(message: types.Message, state: FSMContext):
     try:
-        data = await state.get_data()
-        category = data.get("category")
-        text = data.get("text")
-        timing = data.get("timing", "Не указано")
-        author_id = message.from_user.id
-        author_username = message.from_user.username or message.from_user.first_name
-        
-        if not category or not text:
-            await message.answer("⚠️ Произошла ошибка. Начните заново: /start", reply_markup=types.ReplyKeyboardRemove())
-            await state.clear()
-            return
-        
-        request_id = db.save_request(author_id, author_username, text, category)
-        
-        group_message = f"🆕 Новая заявка №{request_id}\n\n📂 Категория: {CATEGORIES[category]}\n⏳ Срочность: {timing}\n📝 Задача: {text}"
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Принять заказ", callback_data=f"accept_{request_id}")],
-            [InlineKeyboardButton(text="❌ Пропустить", callback_data=f"skip_{request_id}")]
-        ])
-        
-        try:
-            await bot.send_message(MASTERS_GROUP_ID, group_message, reply_markup=keyboard)
-        except TelegramAPIError as e:
-            print(f"Ошибка отправки в группу: {e}")
-            await message.answer("⚠️ Не удалось отправить заявку мастерам. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
-            await state.clear()
-            return
-        
-        await message.answer(
-            f"✅ Заявка №{request_id} передана мастерам.\n\n"
-            f"Вы можете отслеживать её статус в разделе «📋 Мои заявки».",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        await message.answer("Что хотите сделать дальше?", reply_markup=get_customer_menu())
-        await state.clear()
+        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
     except Exception as e:
-        print(f"Критическая ошибка в process_contact: {e}")
-        await message.answer("⚠️ Произошла ошибка. Начните заново: /start", reply_markup=types.ReplyKeyboardRemove())
-        await state.clear()
+        print('Ошибка отправки в группу: ' + str(e))
+        bot.send_message(message.chat.id, 'Не удалось отправить заявку. Попробуйте позже.')
+        user_states.pop(user_id, None)
+        return
+    bot.send_message(message.chat.id, 'Заявка N' + str(request_id) + ' передана мастерам.', reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(message.chat.id, 'Что дальше?', reply_markup=get_customer_menu())
+    user_states.pop(user_id, None)
 
-# ========== МАСТЕР: РЕГИСТРАЦИЯ ==========
+@bot.callback_query_handler(func=lambda call: call.data == 'can_help')
+def process_can_help(call):
+    user_states[call.from_user.id] = {'state': 'waiting_for_categories', 'selected_categories': []}
+    update_categories_keyboard(call.message, [])
 
-class CanHelpStates(StatesGroup):
-    waiting_for_categories = State()
-
-@dp.callback_query(F.data == "can_help")
-async def process_can_help(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.set_state(CanHelpStates.waiting_for_categories)
-    await state.update_data(selected_categories=[])
-    await update_categories_keyboard(callback.message, [])
-
-async def update_categories_keyboard(message: types.Message, selected: list):
-    categories_list = list(CATEGORIES.items())
-    keyboard_rows = []
-    for i in range(0, len(categories_list), 2):
+def update_categories_keyboard(message, selected):
+    markup = types.InlineKeyboardMarkup()
+    cats = list(CATEGORIES.items())
+    for i in range(0, len(cats), 2):
         row = []
         for j in range(2):
             idx = i + j
-            if idx < len(categories_list):
-                cat_key, cat_name = categories_list[idx]
-                label = f"✅ {cat_name}" if cat_key in selected else f"⬜ {cat_name}"
-                row.append(InlineKeyboardButton(text=label, callback_data=f"toggle_{cat_key}"))
-        keyboard_rows.append(row)
-    keyboard_rows.append([InlineKeyboardButton(text="✅ Готово", callback_data="finish_selection")])
+            if idx < len(cats):
+                key, name = cats[idx]
+                if key in selected:
+                    label = 'X ' + name
+                else:
+                    label = 'O ' + name
+                row.append(types.InlineKeyboardButton(text=label, callback_data='toggle_' + key))
+        if row:
+            markup.add(*row)
+    markup.add(types.InlineKeyboardButton('Готово', callback_data='finish_selection'))
     if selected:
-        keyboard_rows.append([InlineKeyboardButton(text="❌ Сбросить всё", callback_data="reset_selection")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-    selected_names = ", ".join([CATEGORIES[c] for c in selected]) if selected else "ничего не выбрано"
-    text = f"Выберите категории помощи (можно несколько):\n\n📌 Выбрано: {selected_names}"
+        markup.add(types.InlineKeyboardButton('Сбросить', callback_data='reset_selection'))
+    names = [CATEGORIES.get(c, c) for c in selected]
+    selected_text = ', '.join(names) if names else 'ничего'
+    text = 'Выберите категории:\n\nВыбрано: ' + selected_text
     try:
-        await message.edit_text(text, reply_markup=keyboard)
-    except TelegramAPIError as e:
-        if "message is not modified" not in str(e).lower():
-            print(f"Ошибка редактирования: {e}")
+        bot.edit_message_text(text, message.chat.id, message.message_id, reply_markup=markup)
+    except Exception:
+        pass
 
-@dp.callback_query(F.data.startswith("toggle_"), CanHelpStates.waiting_for_categories)
-async def toggle_category(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    category = callback.data.replace("toggle_", "")
-    data = await state.get_data()
-    selected = data.get("selected_categories", [])
-    if category in selected:
-        selected.remove(category)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('toggle_'))
+def toggle_category(call):
+    user_id = call.from_user.id
+    state = user_states.get(user_id, {})
+    if state.get('state') != 'waiting_for_categories':
+        return
+    cat = call.data.replace('toggle_', '')
+    selected = state.get('selected_categories', [])
+    if cat in selected:
+        selected.remove(cat)
     else:
-        selected.append(category)
-    await state.update_data(selected_categories=selected)
-    await update_categories_keyboard(callback.message, selected)
+        selected.append(cat)
+    user_states[user_id]['selected_categories'] = selected
+    update_categories_keyboard(call.message, selected)
 
-@dp.callback_query(F.data == "reset_selection", CanHelpStates.waiting_for_categories)
-async def reset_selection(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.update_data(selected_categories=[])
-    await update_categories_keyboard(callback.message, [])
+@bot.callback_query_handler(func=lambda call: call.data == 'reset_selection')
+def reset_selection(call):
+    user_id = call.from_user.id
+    if user_states.get(user_id, {}).get('state') != 'waiting_for_categories':
+        return
+    user_states[user_id]['selected_categories'] = []
+    update_categories_keyboard(call.message, [])
 
-@dp.callback_query(F.data == "finish_selection", CanHelpStates.waiting_for_categories)
-async def finish_selection(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    data = await state.get_data()
-    selected = data.get("selected_categories", [])
+@bot.callback_query_handler(func=lambda call: call.data == 'finish_selection')
+def finish_selection(call):
+    user_id = call.from_user.id
+    state = user_states.get(user_id, {})
+    if state.get('state') != 'waiting_for_categories':
+        return
+    selected = state.get('selected_categories', [])
     if not selected:
-        await callback.message.answer("⚠️ Выберите хотя бы одну категорию!", show_alert=True)
+        bot.send_message(call.message.chat.id, 'Выберите хотя бы одну категорию!')
         return
-    user_id = callback.from_user.id
-    username = callback.from_user.username or callback.from_user.first_name
-    db.save_user(user_id, username, "master", selected)
-    invite_link = os.getenv("GROUP_INVITE_LINK")
-    selected_names = ", ".join([CATEGORIES[c] for c in selected])
-    if invite_link:
-        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n👉 Вступите в группу мастеров:\n{invite_link}", reply_markup=get_master_menu())
+    username = call.from_user.username or call.from_user.first_name
+    db.save_user(user_id, username, 'master', selected)
+    invite = os.getenv('GROUP_INVITE_LINK')
+    names = [CATEGORIES.get(c, c) for c in selected]
+    selected_text = ', '.join(names)
+    if invite:
+        msg = 'Вы зарегистрированы как мастер!\n\nКатегории: ' + selected_text + '\n\nВступите в группу:\n' + invite
     else:
-        await callback.message.edit_text(f"✅ Вы зарегистрированы как мастер!\n\n📌 Категории: {selected_names}\n\n⚠️ Ссылка не настроена. Попросите админа добавить вас.", reply_markup=get_master_menu())
-    await state.clear()
+        msg = 'Вы зарегистрированы как мастер!\n\nКатегории: ' + selected_text + '\n\nСсылка не настроена.'
+    bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+    user_states.pop(user_id, None)
 
-# ========== МАСТЕР: ПРИНЯТИЕ ЗАКАЗА ==========
-
-@dp.callback_query(F.data.startswith("accept_"))
-async def process_accept(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_id = callback.from_user.id
-    master_username = callback.from_user.username or callback.from_user.first_name
-    
+@bot.callback_query_handler(func=lambda call: call.data.startswith('accept_'))
+def process_accept(call):
+    request_id = int(call.data.split('_')[1])
+    master_id = call.from_user.id
+    master_username = call.from_user.username or call.from_user.first_name
     request = db.get_request(request_id)
-    if not request or request[5] != "new":
-        await callback.message.answer("Этот заказ уже принят", show_alert=True)
+    if not request or request[5] != 'new':
+        bot.send_message(call.message.chat.id, 'Этот заказ уже принят')
         return
-    
-    db.update_request_status(request_id, "accepted", master_id, master_username)
+    db.update_request_status(request_id, 'accepted', master_id, master_username)
     author_username = request[2]
-    
-    await callback.message.edit_text(
-        f"✅ Заказ №{request_id} принят мастером @{master_username}\n\n📂 Категория: {CATEGORIES[request[4]]}\n📝 Задача: {request[3]}",
-        reply_markup=None
+    cat_name = CATEGORIES.get(request[4], request[4])
+    new_text = 'Заказ N' + str(request_id) + ' принят @' + master_username + '\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3]
+    bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=None)
+    msg_to_master = 'Вы приняли заказ N' + str(request_id) + '.\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nКонтакт заказчика: @' + author_username + '\n\nСвяжитесь с ним.'
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('В работе', callback_data='progress_' + str(request_id)),
+        types.InlineKeyboardButton('Отказаться', callback_data='cancel_after_' + str(request_id)),
+        types.InlineKeyboardButton('Мои заказы', callback_data='my_orders')
     )
-    
     try:
-        await bot.send_message(
-            master_id,
-            f"📞 Вы приняли заказ №{request_id}.\n\n"
-            f"📂 Категория: {CATEGORIES[request[4]]}\n"
-            f"📝 Задача: {request[3]}\n\n"
-            f"👤 Контакт заказчика: @{author_username}\n\n"
-            f"Свяжитесь с ним для обсуждения деталей.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🟢 В работе", callback_data=f"progress_{request_id}")],
-                [InlineKeyboardButton(text="🔴 Отказаться после диалога", callback_data=f"cancel_after_{request_id}")],
-                [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")]
-            ])
-        )
-    except TelegramAPIError:
+        bot.send_message(master_id, msg_to_master, reply_markup=markup)
+    except Exception:
         pass
-    
     try:
-        await bot.send_message(request[1], f"🔔 Мастер откликнулся на вашу заявку №{request_id}. Ожидайте сообщения от него.")
-    except:
+        bot.send_message(request[1], 'Мастер откликнулся на заявку N' + str(request_id) + '.')
+    except Exception:
         pass
 
-@dp.callback_query(F.data.startswith("skip_"))
-async def process_skip(callback: types.CallbackQuery):
-    await callback.answer()
-    request_id = int(callback.data.split("_")[1])
-    master_username = callback.from_user.username or callback.from_user.first_name
-    current_text = callback.message.text
-    if "Пропущено:" in current_text:
-        new_text = current_text + f", @{master_username}"
+@bot.callback_query_handler(func=lambda call: call.data.startswith('skip_'))
+def process_skip(call):
+    request_id = int(call.data.split('_')[1])
+    master_username = call.from_user.username or call.from_user.first_name
+    current_text = call.message.text
+    if 'Пропущено:' in current_text:
+        new_text = current_text + ', @' + master_username
     else:
-        new_text = current_text + f"\n\n❌ Пропущено: @{master_username}"
+        new_text = current_text + '\n\nПропущено: @' + master_username
     try:
-        await callback.message.edit_text(new_text, reply_markup=callback.message.reply_markup)
-    except TelegramAPIError:
+        bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=call.message.reply_markup)
+    except Exception:
         pass
 
-# ========== МАСТЕР: УПРАВЛЕНИЕ ЗАКАЗОМ ==========
+@bot.callback_query_handler(func=lambda call: call.data.startswith('progress_'))
+def process_progress(call):
+    request_id = int(call.data.split('_')[1])
+    master_id = call.from_user.id
+    db.update_request_status(request_id, 'in_progress', master_id)
+    request = db.get_request(request_id)
+    try:
+        bot.send_message(request[1], 'Мастер начал работу по заявке N' + str(request_id) + '.')
+    except Exception:
+        pass
+    text = 'Заказ N' + str(request_id) + ' в работе.\n\nНажмите Выполнено когда закончите.'
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Выполнено', callback_data='done_' + str(request_id)),
+        types.InlineKeyboardButton('Отказаться', callback_data='cancel_after_' + str(request_id))
+    )
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-class MasterCancelStates(StatesGroup):
-    waiting_for_comment = State()
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_after_'))
+def process_cancel_after(call):
+    request_id = int(call.data.split('_')[1])
+    request = db.get_request(request_id)
+    if not request or request[6] != call.from_user.id:
+        bot.send_message(call.message.chat.id, 'Вы не принимали этот заказ')
+        return
+    user_states[call.from_user.id] = {'state': 'waiting_for_comment', 'cancel_request_id': request_id}
+    text = 'Отказ от заказа N' + str(request_id) + '.\n\nНапишите причину (или Отмена):'
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton('Не отказываться', callback_data='cancel_cancel_' + str(request_id)))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-@dp.callback_query(F.data.startswith("progress_"))
-async def process_progress(callback: types.
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_cancel_'))
+def cancel_cancel(call):
+    user_id = call.from_user.id
+    user_states.pop(user_id, None)
+    request_id = int(call.data.split('_')[2])
+    request = db.get_request(request_id)
+    cat_name = CATEGORIES.get(request[4], request[4])
+    text = 'Заказ N' + str(request_id) + '.\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nКонтакт: @' + request[2]
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('В работе', callback_data='progress_' + str(request_id)),
+        types.InlineKeyboardButton('Отказаться', callback_data='cancel_after_' + str(request_id))
+    )
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_comment')
+def process_cancel_comment(message):
+    user_id = message.from_user.id
+    state = user_states.get(user_id, {})
+    request_id = state.get('cancel_request_id')
+    comment = message.text
+    request = db.get_request(request_id)
+    if not request:
+        bot.send_message(message.chat.id, 'Заявка не найдена')
+        user_states.pop(user_id, None)
+
+    master_username = message.from_user.username or message.from_user.first_name
+
+    new_text = 'Заказ N' + str(request_id) + ' принят @' + master_username + '\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3]
+def process_progress(call):
+        new_text = current_text + ', @' + master_username
+        return
+    master_id = call.from_user.id
+    try:
+        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
+    except Exception:
+    except Exception:
+    user_id = message.from_user.id
+        return
+    markup.add(
+    if not request:
+@bot.callback_query_handler(func=lambda call: call.data.startswith('skip_'))
+    markup = types.InlineKeyboardMarkup()
+    request = db.get_request(request_id)
+    markup.add(
+    )
+        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
+    master_username = call.from_user.username or call.from_user.first_name
+    if 'Пропущено:' in current_text:
+def process_done(call):
+    cat_name = CATEGORIES.get(request[4], request[4])
+    try:
+    request_id = int(call.data.split('_')[2])
+    markup = types.InlineKeyboardMarkup()
+        pass
+def process_skip(call):
+        bot.send_message(request[1], 'Заказ N' + str(request_id) + ' выполнен!\n\nОцените работу:', reply_markup=markup)
+    except Exception:
+        bot.send_message(request[1], 'Мастер откликнулся на заявку N' + str(request_id) + '.')
+        bot.send_message(master_id, msg_to_master, reply_markup=markup)
+    try:
+    except Exception:
+    request = db.get_request(request_id)
+    user_states[call.from_user.id] = {'state': 'waiting_for_comment', 'cancel_request_id': request_id}
+    comment = message.text
+    )
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_cancel_'))
+    )
+        bot.send_message(message.chat.id, 'Заявка снова доступна', reply_markup=get_master_menu())
+    msg_to_master = 'Вы приняли заказ N' + str(request_id) + '.\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nКонтакт заказчика: @' + author_username + '\n\nСвяжитесь с ним.'
+    author_username = request[2]
+        bot.send_message(call.message.chat.id, 'Этот заказ уже принят')
+        types.InlineKeyboardButton('Мои заказы', callback_data='my_orders')
+    db.update_request_status(request_id, 'in_progress', master_id)
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_comment')
+    cat_name = CATEGORIES.get(request[4], request[4])
+    user_id = call.from_user.id
+    user_states.pop(user_id, None)
+        types.InlineKeyboardButton('В работе', callback_data='progress_' + str(request_id)),
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
+    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+
+        return
+    bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(request[1], 'Мастер начал работу по заявке N' + str(request_id) + '.')
+    state = user_states.get(user_id, {})
+        bot.send_message(message.chat.id, 'Заявка не найдена')
+    markup.add(types.InlineKeyboardButton('Не отказываться', callback_data='cancel_cancel_' + str(request_id)))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    except Exception:
+    text = 'Отказ от заказа N' + str(request_id) + '.\n\nНапишите причину (или Отмена):'
+    request = db.get_request(request_id)
+    try:
+def process_cancel_comment(message):
+    user_states.pop(user_id, None)
+        types.InlineKeyboardButton('Отказаться', callback_data='cancel_after_' + str(request_id))
+def process_rating(call):
+    request_id = state.get('cancel_request_id')
+    parts = call.data.split('_')
+    rating = int(parts[1])
+    request_id = int(parts[2])
+    request = db.get_request(request_id)
+    executor_id = request[6]
+    db.update_rating(executor_id, rating)
+    bot.edit_message_text('Спасибо за оценку!', call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data == 'my_orders')
+def my_orders(call):
+    master_id = call.from_user.id
+    requests = db.get_requests_by_master(master_id)
+    if not requests:
+        bot.edit_message_text('У вас пока нет заказов.', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+        return
+    lines = ['Ваши заказы:\n']
+    for req in requests:
+        req_id = req[0]
+        text = req[1]
+        category = req[2]
+        status = req[3]
+        status_emoji = STATUS_EMOJI.get(status, '?')
+        cat_name = CATEGORIES.get(category, category)
+        if len(text) > 50:
+            short_text = text[:50] + '...'
+        else:
+            short_text = text
+        lines.append('N' + str(req_id) + ' ' + status_emoji)
+        lines.append('  ' + cat_name)
+        lines.append('  ' + short_text)
+        lines.append('')
+    result = '\n'.join(lines)
+    bot.edit_message_text(result, call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+
+@bot.callback_query_handler(func=lambda call: True)
+def catch_all(call):
+    bot.answer_callback_query(call.id, 'Кнопка неактивна')
+
+print('Бот запущен!')
+bot.infinity_polling()
