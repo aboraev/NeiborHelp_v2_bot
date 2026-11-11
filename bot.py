@@ -440,79 +440,21 @@ def process_cancel_comment(message):
     if not request:
         bot.send_message(message.chat.id, 'Заявка не найдена')
         user_states.pop(user_id, None)
-
-    master_username = message.from_user.username or message.from_user.first_name
-
-    new_text = 'Заказ N' + str(request_id) + ' принят @' + master_username + '\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3]
-def process_progress(call):
-        new_text = current_text + ', @' + master_username
-        return
-    master_id = call.from_user.id
-    try:
-        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
-    except Exception:
-    except Exception:
-    user_id = message.from_user.id
-        return
-    markup.add(
-    if not request:
-@bot.callback_query_handler(func=lambda call: call.data.startswith('skip_'))
-    markup = types.InlineKeyboardMarkup()
     request = db.get_request(request_id)
-    markup.add(
     )
-        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
-    master_username = call.from_user.username or call.from_user.first_name
-    if 'Пропущено:' in current_text:
-def process_done(call):
-    cat_name = CATEGORIES.get(request[4], request[4])
-    try:
-    request_id = int(call.data.split('_')[2])
-    markup = types.InlineKeyboardMarkup()
-        pass
-def process_skip(call):
         bot.send_message(request[1], 'Заказ N' + str(request_id) + ' выполнен!\n\nОцените работу:', reply_markup=markup)
-    except Exception:
-        bot.send_message(request[1], 'Мастер откликнулся на заявку N' + str(request_id) + '.')
-        bot.send_message(master_id, msg_to_master, reply_markup=markup)
-    try:
-    except Exception:
-    request = db.get_request(request_id)
-    user_states[call.from_user.id] = {'state': 'waiting_for_comment', 'cancel_request_id': request_id}
-    comment = message.text
-    )
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_cancel_'))
-    )
-        bot.send_message(message.chat.id, 'Заявка снова доступна', reply_markup=get_master_menu())
-    msg_to_master = 'Вы приняли заказ N' + str(request_id) + '.\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nКонтакт заказчика: @' + author_username + '\n\nСвяжитесь с ним.'
-    author_username = request[2]
-        bot.send_message(call.message.chat.id, 'Этот заказ уже принят')
-        types.InlineKeyboardButton('Мои заказы', callback_data='my_orders')
-    db.update_request_status(request_id, 'in_progress', master_id)
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_comment')
-    cat_name = CATEGORIES.get(request[4], request[4])
-    user_id = call.from_user.id
-    user_states.pop(user_id, None)
-        types.InlineKeyboardButton('В работе', callback_data='progress_' + str(request_id)),
-@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
-    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-
-        return
-    bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=None)
-        bot.send_message(request[1], 'Мастер начал работу по заявке N' + str(request_id) + '.')
-    state = user_states.get(user_id, {})
-        bot.send_message(message.chat.id, 'Заявка не найдена')
     markup.add(types.InlineKeyboardButton('Не отказываться', callback_data='cancel_cancel_' + str(request_id)))
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-    text = 'Отказ от заказа N' + str(request_id) + '.\n\nНапишите причину (или Отмена):'
-    request = db.get_request(request_id)
+    user_id = call.from_user.id
     try:
-def process_cancel_comment(message):
-    user_states.pop(user_id, None)
-        types.InlineKeyboardButton('Отказаться', callback_data='cancel_after_' + str(request_id))
+    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+    master_username = message.from_user.username or message.from_user.first_name
+    request_id = int(call.data.split('_')[2])
+    cat_name = CATEGORIES.get(request[4], request[4])
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
 def process_rating(call):
-    request_id = state.get('cancel_request_id')
     parts = call.data.split('_')
     rating = int(parts[1])
     request_id = int(parts[2])
