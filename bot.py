@@ -80,7 +80,6 @@ def generate_captcha():
     random.shuffle(options)
     question = 'Сколько будет ' + str(a) + ' + ' + str(b) + '?'
     return question, correct, options
-
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     user_id = message.from_user.id
@@ -156,7 +155,6 @@ def show_my_requests(message, user_id):
         lines.append('')
     result = '\n'.join(lines)
     bot.send_message(message.chat.id, result, reply_markup=get_customer_menu())
-
 @bot.callback_query_handler(func=lambda call: call.data == 'need_help')
 def process_need_help(call):
     user_states[call.from_user.id] = {'state': 'waiting_for_category'}
@@ -230,7 +228,6 @@ def ask_for_contact(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton('Поделиться контактом', request_contact=True))
     bot.send_message(message.chat.id, 'Поделитесь контактом Telegram:', reply_markup=markup)
-
 @bot.message_handler(content_types=['contact'])
 def process_contact(message):
     user_id = message.from_user.id
@@ -339,7 +336,6 @@ def finish_selection(call):
         msg = 'Вы зарегистрированы как мастер!\n\nКатегории: ' + selected_text + '\n\nСсылка не настроена.'
     bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
     user_states.pop(user_id, None)
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith('accept_'))
 def process_accept(call):
     request_id = int(call.data.split('_')[1])
@@ -440,22 +436,41 @@ def process_cancel_comment(message):
     if not request:
         bot.send_message(message.chat.id, 'Заявка не найдена')
         user_states.pop(user_id, None)
-        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
-    if not request:
-    markup = types.InlineKeyboardMarkup()
-    request_id = int(call.data.split('_')[2])
-    )
-    request_id = int(call.data.split('_')[1])
-
-    markup.add(
-    try:
-
         return
-    request = db.get_request(request_id)
-    master_id = call.from_user.id
-@bot.callback_query_handler(func=lambda call: call.data.startswith('done_'))
-@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
+    master_username = message.from_user.username or message.from_user.first_name
+    db.update_request_status(request_id, 'new', None, None)
     cat_name = CATEGORIES.get(request[4], request[4])
+    group_msg = 'Заявка N' + str(request_id) + ' снова доступна\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nОтказ от @' + master_username + '\nКомментарий: ' + comment
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
+        types.InlineKeyboardButton('Пропустить', callback_data='skip_' + str(request_id))
+    )
+    try:
+        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
+        bot.send_message(message.chat.id, 'Заявка снова доступна', reply_markup=get_master_menu())
+    except Exception:
+        bot.send_message(message.chat.id, 'Не удалось опубликовать')
+    user_states.pop(user_id, None)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('done_'))
+def process_done(call):
+    request_id = int(call.data.split('_')[1])
+    master_id = call.from_user.id
+    db.update_request_status(request_id, 'done', master_id)
+    request = db.get_request(request_id)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Отлично', callback_data='rate_5_' + str(request_id)),
+        types.InlineKeyboardButton('Плохо', callback_data='rate_1_' + str(request_id))
+    )
+    try:
+        bot.send_message(request[1], 'Заказ N' + str(request_id) + ' выполнен!\n\nОцените работу:', reply_markup=markup)
+    except Exception:
+        pass
+    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
 def process_rating(call):
     parts = call.data.split('_')
     rating = int(parts[1])
