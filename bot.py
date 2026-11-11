@@ -440,20 +440,22 @@ def process_cancel_comment(message):
     if not request:
         bot.send_message(message.chat.id, 'Заявка не найдена')
         user_states.pop(user_id, None)
-    request = db.get_request(request_id)
-    )
-        bot.send_message(request[1], 'Заказ N' + str(request_id) + ' выполнен!\n\nОцените работу:', reply_markup=markup)
-    markup.add(types.InlineKeyboardButton('Не отказываться', callback_data='cancel_cancel_' + str(request_id)))
-    user_id = call.from_user.id
-    try:
-    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-    master_username = message.from_user.username or message.from_user.first_name
+        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
+    if not request:
+    markup = types.InlineKeyboardMarkup()
     request_id = int(call.data.split('_')[2])
-    cat_name = CATEGORIES.get(request[4], request[4])
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    )
+    request_id = int(call.data.split('_')[1])
 
+    markup.add(
+    try:
 
+        return
+    request = db.get_request(request_id)
+    master_id = call.from_user.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith('done_'))
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
+    cat_name = CATEGORIES.get(request[4], request[4])
 def process_rating(call):
     parts = call.data.split('_')
     rating = int(parts[1])
