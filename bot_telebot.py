@@ -435,4 +435,80 @@ def process_cancel_comment(message):
     request = db.get_request(request_id)
     if not request:
         bot.send_message(message.chat.id, 'Заявка не найдена')
-        user_state
+                user_states.pop(user_id, None)
+        return
+    master_username = message.from_user.username or message.from_user.first_name
+    db.update_request_status(request_id, 'new', None, None)
+    cat_name = CATEGORIES.get(request[4], request[4])
+    group_msg = 'Заявка N' + str(request_id) + ' снова доступна\n\nКатегория: ' + cat_name + '\nЗадача: ' + request[3] + '\n\nОтказ от @' + master_username + '\nКомментарий: ' + comment
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Принять', callback_data='accept_' + str(request_id)),
+        types.InlineKeyboardButton('Пропустить', callback_data='skip_' + str(request_id))
+    )
+    try:
+        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
+        bot.send_message(message.chat.id, 'Заявка снова доступна', reply_markup=get_master_menu())
+    except Exception:
+        bot.send_message(message.chat.id, 'Не удалось опубликовать')
+    user_states.pop(user_id, None)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('done_'))
+def process_done(call):
+    request_id = int(call.data.split('_')[1])
+    master_id = call.from_user.id
+    db.update_request_status(request_id, 'done', master_id)
+    request = db.get_request(request_id)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('Отлично', callback_data='rate_5_' + str(request_id)),
+        types.InlineKeyboardButton('Плохо', callback_data='rate_1_' + str(request_id))
+    )
+    try:
+        bot.send_message(request[1], 'Заказ N' + str(request_id) + ' выполнен!\n\nОцените работу:', reply_markup=markup)
+    except Exception:
+        pass
+    bot.edit_message_text('Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
+def process_rating(call):
+    parts = call.data.split('_')
+    rating = int(parts[1])
+    request_id = int(parts[2])
+    request = db.get_request(request_id)
+    executor_id = request[6]
+    db.update_rating(executor_id, rating)
+    bot.edit_message_text('Спасибо за оценку!', call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data == 'my_orders')
+def my_orders(call):
+    master_id = call.from_user.id
+    requests = db.get_requests_by_master(master_id)
+    if not requests:
+        bot.edit_message_text('У вас пока нет заказов.', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+        return
+    lines = ['Ваши заказы:\n']
+    for req in requests:
+        req_id = req[0]
+        text = req[1]
+        category = req[2]
+        status = req[3]
+        status_emoji = STATUS_EMOJI.get(status, '?')
+        cat_name = CATEGORIES.get(category, category)
+        if len(text) > 50:
+            short_text = text[:50] + '...'
+        else:
+            short_text = text
+        lines.append('N' + str(req_id) + ' ' + status_emoji)
+        lines.append('  ' + cat_name)
+        lines.append('  ' + short_text)
+        lines.append('')
+    result = '\n'.join(lines)
+    bot.edit_message_text(result, call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
+
+@bot.callback_query_handler(func=lambda call: True)
+def catch_all(call):
+    bot.answer_callback_query(call.id, 'Кнопка неактивна')
+
+print('Бот запущен!')
+bot.infinity_polling()
