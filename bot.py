@@ -1,879 +1,526 @@
-import os
-import random
-import telebot
+import os, random, telebot
 from telebot import types
 from dotenv import load_dotenv
 from database import Database
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    import requests
+    _old = requests.Session.merge_environment_settings
+    def _new(self, url, proxies, stream, verify, cert):
+        s = _old(self, url, proxies, stream, verify, cert)
+        s['verify'] = False
+        return s
+    requests.Session.merge_environment_settings = _new
+except Exception: pass
 
-load_dotenv('/data/data/com.termux/files/home/.env')
-
+load_dotenv(os.path.expanduser('~/.env'))
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-MASTERS_GROUP_ID_STR = os.getenv('MASTERS_GROUP_ID')
-ADMIN_ID_STR = os.getenv('ADMIN_ID')
-
-if not BOT_TOKEN or not MASTERS_GROUP_ID_STR or not ADMIN_ID_STR:
-    print('Ошибка: проверьте переменные в .env!')
-    exit()
-
-MASTERS_GROUP_ID = int(MASTERS_GROUP_ID_STR)
-ADMIN_ID = int(ADMIN_ID_STR)
+MASTERS_GROUP_ID = int(os.getenv('MASTERS_GROUP_ID'))
+ADMIN_ID = int(os.getenv('ADMIN_ID'))
+if not BOT_TOKEN or not MASTERS_GROUP_ID or not ADMIN_ID:
+    print('Ошибка: проверьте .env!'); exit()
 
 bot = telebot.TeleBot(BOT_TOKEN)
 db = Database()
 
 CATEGORIES = {
-    'repair': {
-        'name': '🔧 Ремонт',
-        'sub': ['Сантехника', 'Электрика', 'Плитка', 'Малярка', 'Сборка мебели', 'Мелкий ремонт']
-    },
-    'tech': {
-        'name': '💻 Техника',
-        'sub': ['Компьютеры', 'Телефоны', 'Бытовая техника', 'ТВ/Аудио', 'Настройка ПО']
-    },
-    'auto': {
-        'name': '🚗 Авто/Транспорт',
-        'sub': ['Помощь с авто', 'Перевозки', 'Погрузка', 'Прикуривание', 'Совместные поездки', 'Доставка']
-    },
-    'home_services': {
-        'name': '🏠 Бытовые услуги',
-        'sub': ['Уборка', 'Выпечка', 'Поход в магазин', 'Шитьё и вышивка']
-    },
-    'consult': {
-        'name': '📚 Консультации',
-        'sub': ['Юрист', 'Бухгалтер', 'Репетитор', 'Тренер', 'Помощь с детьми', 'Мастер-классы']
-    },
-    'it': {
-        'name': '💡 IT услуги',
-        'sub': ['Сайты', 'Боты', 'Настройка ПК', 'Wi-Fi/сети', 'Обучение']
-    },
-    'pets': {
-        'name': '🌿 Животные и растения',
-        'sub': ['Выгул', 'Передержка', 'Груминг', 'Полив', 'Уход за садом']
-    },
-    'other': {
-        'name': '❓ Другое',
-        'sub': []
-    }
+    'repair': {'name': '🔧 Ремонт', 'sub': ['Сантехника', 'Электрика', 'Плитка', 'Малярка', 'Сборка мебели', 'Мелкий ремонт']},
+    'tech': {'name': '💻 Техника', 'sub': ['Компьютеры', 'Телефоны', 'Бытовая техника', 'ТВ/Аудио', 'Настройка ПО']},
+    'auto': {'name': '🚗 Авто', 'sub': ['Помощь с авто', 'Перевозки', 'Погрузка', 'Прикуривание', 'Совместные поездки']},
+    'home_services': {'name': '🏠 Бытовые', 'sub': ['Уборка', 'Выпечка', 'Поход в магазин', 'Шитьё']},
+    'consult': {'name': '📚 Консультации', 'sub': ['Юрист', 'Бухгалтер', 'Репетитор', 'Тренер', 'Помощь с детьми']},
+    'it': {'name': '💡 IT', 'sub': ['Сайты', 'Боты', 'Настройка ПК', 'Wi-Fi/сети']},
+    'pets': {'name': '🌿 Животные', 'sub': ['Выгул', 'Передержка', 'Груминг', 'Полив']},
+    'other': {'name': '❓ Другое', 'sub': []}
 }
-
-STATUS_EMOJI = {
-    'new': '🆕 Новая',
-    'accepted': '✅ Принята',
-    'in_progress': '⚙️ В работе',
-    'done': '✔️ Выполнена',
-    'cancelled': '❌ Отменена'
-}
-
-SPAM_WORDS = ['заработок', 'крипто', 'инвестиции', 'казино', 'бесплатно', 'акция', 'скидка', 'заработай', 'доход']
+STATUS_EMOJI = {'new': '🆕', 'accepted': '✅', 'in_progress': '⚙️', 'done': '✔️', 'cancelled': '❌', 'archived': '📦'}
+SPAM_WORDS = ['заработок', 'крипто', 'инвестиции', 'казино', 'бесплатно', 'акция']
 captcha_answers = {}
 user_states = {}
 
-def get_customer_menu():
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-        types.InlineKeyboardButton('📝 Создать заявку', callback_data='need_help'),
-        types.InlineKeyboardButton('📋 Мои заявки', callback_data='my_requests'),
-        types.InlineKeyboardButton('ℹ️ Как это работает', callback_data='info')
-    )
-    return markup
-
-def get_master_menu():
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-        types.InlineKeyboardButton('📦 Мои заказы', callback_data='my_orders'),
-        types.InlineKeyboardButton('⚙️ Изменить категории', callback_data='can_help'),
-        types.InlineKeyboardButton('ℹ️ Как это работает', callback_data='info')
-    )
-    return markup
+def safe_edit(call, text, markup=None):
+    try: bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        if 'not modified' not in str(e): print('Edit err:', e)
 
 def get_main_menu():
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-        types.InlineKeyboardButton('🆘 Мне нужна помощь', callback_data='need_help'),
-        types.InlineKeyboardButton('🛠️ Я могу помочь', callback_data='can_help'),
-        types.InlineKeyboardButton('📋 Мои заявки', callback_data='my_requests'),
-        types.InlineKeyboardButton('ℹ️ Как это работает', callback_data='info')
-    )
-    return markup
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('🆘 Мне нужна помощь', callback_data='need_help'))
+    m.add(types.InlineKeyboardButton('🛠️ Я могу помочь', callback_data='master_settings'))
+    m.add(types.InlineKeyboardButton('📋 Мои заявки', callback_data='my_requests_menu'))
+    m.add(types.InlineKeyboardButton('ℹ️ Инфо', callback_data='info'))
+    return m
 
-def generate_captcha():
-    a = random.randint(1, 10)
-    b = random.randint(1, 10)
-    correct = a + b
-    options = [correct - 1, correct, correct + 1]
-    random.shuffle(options)
-    question = 'Сколько будет ' + str(a) + ' + ' + str(b) + '?'
-    return question, correct, options
+def get_master_settings_menu(user):
+    m = types.InlineKeyboardMarkup(row_width=1)
+    if user and user['role'] == 'master':
+        m.add(types.InlineKeyboardButton('⚙️ Изменить категории', callback_data='edit_cats'))
+        m.add(types.InlineKeyboardButton('🚫 Отписаться от мастеров', callback_data='unsubscribe_master'))
+    else:
+        m.add(types.InlineKeyboardButton('🚀 Стать мастером', callback_data='edit_cats'))
+    m.add(types.InlineKeyboardButton('🆘 Мне нужна помощь', callback_data='need_help'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    return m
+
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    user_id = message.from_user.id
-    question, correct, options = generate_captcha()
-    captcha_answers[user_id] = {'correct': correct, 'attempts': 0}
-    markup = types.InlineKeyboardMarkup()
-    for opt in options:
-        markup.add(types.InlineKeyboardButton(text=str(opt), callback_data='captcha_' + str(opt)))
-    text = 'Привет! Подтверди, что ты не бот.\n\n' + question
-    bot.send_message(message.chat.id, text, reply_markup=markup)
+    user = db.get_user(message.from_user.id)
+    if user and user.get('is_verified'):
+        bot.send_message(message.chat.id, 'С возвращением!', reply_markup=get_main_menu())
+        return
+    a, b = random.randint(1, 10), random.randint(1, 10)
+    correct = a + b
+    opts = sorted([correct - 1, correct, correct + 1], key=lambda x: random.random())
+    captcha_answers[message.from_user.id] = {'correct': correct, 'attempts': 0}
+    m = types.InlineKeyboardMarkup()
+    for o in opts: m.add(types.InlineKeyboardButton(str(o), callback_data='captcha_' + str(o)))
+    bot.send_message(message.chat.id, 'Привет! Подтверди, что ты не бот.\n\nСколько будет ' + str(a) + ' + ' + str(b) + '?', reply_markup=m)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('captcha_'))
+@bot.callback_query_handler(func=lambda c: c.data.startswith('captcha_'))
 def process_captcha(call):
-    user_id = call.from_user.id
-    answer = int(call.data.split('_')[1])
-    if user_id not in captcha_answers:
-        bot.send_message(call.message.chat.id, 'Капча устарела, напишите /start')
-        return
-    correct = captcha_answers[user_id]['correct']
-    if answer == correct:
-        captcha_answers[user_id] = 'passed'
-        bot.edit_message_text('✅ Капча пройдена!', call.message.chat.id, call.message.message_id)
-        bot.send_message(call.message.chat.id, 'Что хотите сделать?', reply_markup=get_main_menu())
+    uid = call.from_user.id
+    if uid not in captcha_answers:
+        bot.answer_callback_query(call.id, 'Капча устарела, /start'); return
+    ans = int(call.data.split('_')[1])
+    if ans == captcha_answers[uid]['correct']:
+        db.verify_user(uid)
+        if not db.get_user(uid): db.save_user(uid, call.from_user.username or call.from_user.first_name, 'customer', [])
+        safe_edit(call, '✅ Капча пройдена!')
+        bot.send_message(call.message.chat.id, 'Добро пожаловать!', reply_markup=get_main_menu())
+        del captcha_answers[uid]
     else:
-        captcha_answers[user_id]['attempts'] += 1
-        if captcha_answers[user_id]['attempts'] >= 3:
-            bot.send_message(call.message.chat.id, 'Слишком много попыток. Попробуйте позже.')
-            captcha_answers.pop(user_id, None)
-        else:
-            q, c, opts = generate_captcha()
-            captcha_answers[user_id]['correct'] = c
-            markup = types.InlineKeyboardMarkup()
-            for o in opts:
-                markup.add(types.InlineKeyboardButton(text=str(o), callback_data='captcha_' + str(o)))
-            text = 'Неверно. Ещё раз:\n\n' + q
-            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'home')
-def process_home(call):
-    user_id = call.from_user.id
-    user = db.get_user(user_id)
-    if user and user[3] == 'master':
-        bot.edit_message_text('🏠 Главное меню ЖК', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-    else:
-        bot.edit_message_text('🏠 Главное меню ЖК', call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data == 'info')
-def show_info(call):
-    text = '🏘️ Добро пожаловать в бот ЖК!\n\n'
-    text += 'Это сервис взаимопомощи соседей. Здесь вы можете найти мастера для решения бытовых задач или предложить свои услуги.\n\n'
-    text += '📌 КАК ЭТО РАБОТАЕТ:\n\n'
-    text += '1️⃣ СОЗДАЙТЕ ЗАЯВКУ\n'
-    text += 'Опишите задачу, выберите категорию и удобное время.\n\n'
-    text += '2️⃣ ЗАЯВКА ПОПАДАЕТ К МАСТЕРАМ\n'
-    text += 'Мастера вашего ЖК, которые указали нужную категорию, увидят вашу заявку и смогут откликнуться.\n\n'
-    text += '3️⃣ ВЫБОР МАСТЕРА\n'
-    text += 'Первый откликнувшийся мастер получает ваш контакт. Вы договариваетесь напрямую — без комиссий и посредников.\n\n'
-    text += '4️⃣ ВЫПОЛНЕНИЕ РАБОТЫ\n'
-    text += 'Мастер выполняет задачу. Вы можете отслеживать статус в разделе "Мои заявки".\n\n'
-    text += '5️⃣ ОЦЕНКА\n'
-    text += 'После выполнения оцените работу мастера. Это помогает другим соседям выбирать надёжных помощников.\n\n'
-    text += '⚠️ ПРАВИЛА:\n'
-    text += '• Не публикуйте ссылки и рекламные сообщения\n'
-    text += '• Уважайте соседей\n'
-    text += '• Отменяйте заявку, если потребность отпала\n'
-    text += '• Ограничение: максимум 3 активные заявки одновременно\n\n'
-    text += '🤝 Помогая соседям, вы делаете наш ЖК лучше!'
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
-
-@bot.message_handler(commands=['my'])
-def cmd_my(message):
-    show_my_requests(message, message.from_user.id)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'my_requests')
-def cb_my_requests(call):
-    show_my_requests(call.message, call.from_user.id)
-
-def show_my_requests(message, user_id):
-    requests = db.get_requests_by_user(user_id)
-    if not requests:
-        bot.send_message(message.chat.id, '📋 У вас пока нет заявок.', reply_markup=get_customer_menu())
-        return
-    lines = ['📋 Ваши заявки:\n']
-    for req in requests:
-        req_id = req[0]
-        text = req[1]
-        category = req[2]
-        status = req[3]
-        executor = req[4]
-        status_emoji = STATUS_EMOJI.get(status, '❓')
-        cat_name = CATEGORIES.get(category, {}).get('name', category) if isinstance(CATEGORIES.get(category, {}), dict) else category
-        exec_info = ' | @' + str(executor) if executor else ''
-        if len(text) > 50:
-            short_text = text[:50] + '...'
-        else:
-            short_text = text
-        lines.append(status_emoji + ' N' + str(req_id))
-        lines.append('  ' + cat_name)
-        lines.append('  ' + short_text + exec_info)
-        lines.append('')
-    result = '\n'.join(lines)
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-        types.InlineKeyboardButton('📝 Создать заявку', callback_data='need_help')
-    )
-    bot.send_message(message.chat.id, result, reply_markup=markup)
-@bot.callback_query_handler(func=lambda call: call.data == 'need_help')
-def process_need_help(call):
-    user_id = call.from_user.id
-    user = db.get_user(user_id)
-    if user and user[3] == 'master':
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-            types.InlineKeyboardButton('📦 Мои заказы', callback_data='my_orders')
-        )
-        bot.edit_message_text('🏠 Главное меню ЖК', call.message.chat.id, call.message.message_id, reply_markup=markup)
-        return
-    user_states[call.from_user.id] = {'state': 'waiting_for_category'}
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    for key, data in CATEGORIES.items():
-        markup.add(types.InlineKeyboardButton(text=data['name'], callback_data='cat_' + key))
-    markup.add(types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'))
-    bot.edit_message_text('📝 Выберите категорию:', call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
-def process_category(call):
-    user_id = call.from_user.id
-    if user_states.get(user_id, {}).get('state') != 'waiting_for_category':
-        return
-    category = call.data.split('_', 1)[1]
-    subcategories = CATEGORIES.get(category, {}).get('sub', [])
-    if not subcategories or category == 'other':
-        user_states[user_id] = {'state': 'waiting_for_text', 'category': category, 'subcategory': 'Другое'}
-        cat_name = CATEGORIES.get(category, {}).get('name', category)
-        text = '📝 Опишите задачу (до 300 символов):\n\nКатегория: ' + cat_name
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
-    else:
-        user_states[user_id] = {'state': 'waiting_for_subcategory', 'category': category}
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        for sub in subcategories:
-            markup.add(types.InlineKeyboardButton(text=sub, callback_data='sub_' + category + '_' + sub))
-        markup.add(types.InlineKeyboardButton('◀️ Назад к категориям', callback_data='need_help'))
-        markup.add(types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'))
-        cat_name = CATEGORIES.get(category, {}).get('name', category)
-        text = '📝 ' + cat_name + '\n\nВыберите подкатегорию:'
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('sub_'))
-def process_subcategory(call):
-    user_id = call.from_user.id
-    if user_states.get(user_id, {}).get('state') != 'waiting_for_subcategory':
-        return
-    parts = call.data.split('_', 2)
-    category = parts[1]
-    subcategory = parts[2]
-    user_states[user_id] = {'state': 'waiting_for_text', 'category': category, 'subcategory': subcategory}
-    cat_name = CATEGORIES.get(category, {}).get('name', category)
-    text = '📝 Опишите задачу (до 300 символов):\n\nКатегория: ' + cat_name + '\nПодкатегория: ' + subcategory
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_text')
-def process_text(message):
-    text = message.text
-    if len(text) > 300:
-        bot.send_message(message.chat.id, '⚠️ Слишком длинно. Сократите до 300 символов.')
-        return
-    if 'http' in text.lower():
-        bot.send_message(message.chat.id, '❌ Сообщение отклонено (ссылки запрещены).')
-        return
-    for word in SPAM_WORDS:
-        if word in text.lower():
-            bot.send_message(message.chat.id, '❌ Сообщение отклонено (похоже на спам).')
-            return
-    user_states[message.from_user.id]['text'] = text
-    user_states[message.from_user.id]['state'] = 'waiting_for_timing'
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('⚡ Срочно', callback_data='time_urgent'),
-        types.InlineKeyboardButton('📅 Укажу дату и время', callback_data='time_custom'),
-        types.InlineKeyboardButton('💬 Обговорю с соседом', callback_data='time_discuss')
-    )
-    markup.add(types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'))
-    bot.send_message(message.chat.id, '⏰ Когда нужно выполнить задачу?', reply_markup=markup)
-@bot.callback_query_handler(func=lambda call: call.data in ['time_urgent', 'time_discuss', 'time_custom'])
-def process_timing(call):
-    user_id = call.from_user.id
-    if user_states.get(user_id, {}).get('state') != 'waiting_for_timing':
-        return
-    if call.data == 'time_urgent':
-        user_states[user_id]['timing'] = '⚡ Срочно'
-        user_states[user_id]['state'] = 'waiting_for_contact'
-        ask_for_contact(call.message)
-    elif call.data == 'time_discuss':
-        user_states[user_id]['timing'] = '💬 Обговорю с соседом'
-        user_states[user_id]['state'] = 'waiting_for_contact'
-        ask_for_contact(call.message)
-    else:
-        user_states[user_id]['state'] = 'waiting_for_custom_time'
-        bot.edit_message_text('📅 Напишите дату и время (например: завтра в 18:00):', call.message.chat.id, call.message.message_id)
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_custom_time')
-def process_custom_time(message):
-    timing = message.text
-    if len(timing) > 50:
-        bot.send_message(message.chat.id, '⚠️ Слишком длинно. Напишите короче.')
-        return
-    user_states[message.from_user.id]['timing'] = '📅 ' + timing
-    user_states[message.from_user.id]['state'] = 'waiting_for_contact'
-    ask_for_contact(message)
-
-def ask_for_contact(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton('📱 Поделиться контактом', request_contact=True))
-    markup.add(types.KeyboardButton('🏠 ЖК (Главная)'))
-    bot.send_message(message.chat.id, '📱 Поделитесь контактом Telegram для связи с мастером:', reply_markup=markup)
-
-@bot.message_handler(content_types=['contact'])
-def process_contact(message):
-    user_id = message.from_user.id
-    state = user_states.get(user_id, {})
-    if state.get('state') != 'waiting_for_contact':
-        return
-    category = state.get('category')
-    subcategory = state.get('subcategory', 'Другое')
-    text = state.get('text')
-    timing = state.get('timing', 'Не указано')
-    if not category or not text:
-        bot.send_message(message.chat.id, '⚠️ Ошибка. Напишите /start')
-        user_states.pop(user_id, None)
-        return
-    active_requests = db.get_requests_by_user(user_id)
-    active_count = 0
-    for req in active_requests:
-        if req[3] in ['new', 'accepted', 'in_progress']:
-            active_count += 1
-    if active_count >= 3:
-        bot.send_message(message.chat.id, '⚠️ У вас уже 3 активные заявки. Дождитесь выполнения или отмените одну из них.', reply_markup=types.ReplyKeyboardRemove())
-        user_states.pop(user_id, None)
-        return
-    request_id = db.save_request(user_id, message.from_user.username or message.from_user.first_name, text, category, subcategory)
-    cat_name = CATEGORIES.get(category, {}).get('name', category)
-    group_msg = '🆕 Новая заявка N' + str(request_id) + '\n\n'
-    group_msg += '📂 Категория: ' + cat_name + '\n'
-    group_msg += '🔸 Подкатегория: ' + subcategory + '\n'
-    group_msg += '⏰ Срочность: ' + timing + '\n'
-    group_msg += '📝 Задача: ' + text
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton('✅ Принять', callback_data='accept_' + str(request_id)),
-        types.InlineKeyboardButton('⏭️ Пропустить', callback_data='skip_' + str(request_id))
-    )
-    try:
-        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
-    except Exception as e:
-        print('Ошибка отправки в группу: ' + str(e))
-        bot.send_message(message.chat.id, '❌ Не удалось отправить заявку. Попробуйте позже.', reply_markup=types.ReplyKeyboardRemove())
-        user_states.pop(user_id, None)
-        return
-    bot.send_message(message.chat.id, '✅ Заявка N' + str(request_id) + ' передана мастерам ЖК.\n\nОтслеживайте статус в разделе "Мои заявки".', reply_markup=types.ReplyKeyboardRemove())
-    bot.send_message(message.chat.id, 'Что дальше?', reply_markup=get_customer_menu())
-    user_states.pop(user_id, None)
-
-@bot.message_handler(func=lambda message: message.text == '🏠 ЖК (Главная)')
-def process_home_text(message):
-    user_id = message.from_user.id
-    user_states.pop(user_id, None)
-    user = db.get_user(user_id)
-    if user and user[3] == 'master':
-        bot.send_message(message.chat.id, '🏠 Главное меню ЖК', reply_markup=get_master_menu())
-    else:
-        bot.send_message(message.chat.id, '🏠 Главное меню ЖК', reply_markup=get_customer_menu())
-@bot.callback_query_handler(func=lambda call: call.data == 'can_help')
-def process_can_help(call):
-    user_id = call.from_user.id
-    user = db.get_user(user_id)
-    if user and user[3] == 'master':
-        user_states[call.from_user.id] = {'state': 'waiting_for_categories', 'selected_categories': user[4] if len(user) > 4 else []}
-    else:
-        user_states[call.from_user.id] = {'state': 'waiting_for_categories', 'selected_categories': []}
-    update_categories_keyboard(call.message, user_states[call.from_user.id]['selected_categories'])
-
-def update_categories_keyboard(message, selected):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    cats = list(CATEGORIES.items())
-    for key, data in cats:
-        if key in selected:
-            label = '✅ ' + data['name']
-        else:
-            label = '⭕ ' + data['name']
-        markup.add(types.InlineKeyboardButton(text=label, callback_data='toggle_' + key))
-    markup.add(types.InlineKeyboardButton('✔️ Готово', callback_data='finish_selection'))
-    if selected:
-        markup.add(types.InlineKeyboardButton('🔄 Сбросить выбор', callback_data='reset_selection'))
-    markup.add(types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'))
-    
-    names = [CATEGORIES.get(c, {}).get('name', c) for c in selected]
-    selected_text = ', '.join(names) if names else 'ничего не выбрано'
-    text = '🛠️ Регистрация мастера\n\nВыберите категории, в которых вы можете помочь:\n\nВыбрано: ' + selected_text
-    try:
-        bot.edit_message_text(text, message.chat.id, message.message_id, reply_markup=markup)
-    except Exception:
-        bot.send_message(message.chat.id, text, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('toggle_'))
-def toggle_category(call):
-    user_id = call.from_user.id
-    state = user_states.get(user_id, {})
-    if state.get('state') != 'waiting_for_categories':
-        return
-    cat = call.data.replace('toggle_', '')
-    selected = state.get('selected_categories', [])
-    if cat in selected:
-        selected.remove(cat)
-    else:
-        selected.append(cat)
-    user_states[user_id]['selected_categories'] = selected
-    update_categories_keyboard(call.message, selected)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'reset_selection')
-def reset_selection(call):
-    user_id = call.from_user.id
-    if user_states.get(user_id, {}).get('state') != 'waiting_for_categories':
-        return
-    user_states[user_id]['selected_categories'] = []
-    update_categories_keyboard(call.message, [])
-
-@bot.callback_query_handler(func=lambda call: call.data == 'finish_selection')
-def finish_selection(call):
-    user_id = call.from_user.id
-    state = user_states.get(user_id, {})
-    if state.get('state') != 'waiting_for_categories':
-        return
-    selected = state.get('selected_categories', [])
-    if not selected:
-        bot.send_message(call.message.chat.id, '⚠️ Выберите хотя бы одну категорию!')
-        return
-    username = call.from_user.username or call.from_user.first_name
-    db.save_user(user_id, username, 'master', selected)
-    invite = os.getenv('GROUP_INVITE_LINK')
-    names = [CATEGORIES.get(c, {}).get('name', c) for c in selected]
-    selected_text = ', '.join(names)
-    if invite:
-        msg = '✅ Вы зарегистрированы как мастер ЖК!\n\nВаши категории: ' + selected_text + '\n\nВступите в группу мастеров:\n' + invite
-    else:
-        msg = '✅ Вы зарегистрированы как мастер ЖК!\n\nВаши категории: ' + selected_text
-    bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-    user_states.pop(user_id, None)
-# --- Управление заявками пользователя (Отмена и Редактирование) ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_req_'))
-def cancel_request(call):
-    user_id = call.from_user.id
-    request_id = int(call.data.split('_')[2])
-    request = db.get_request(request_id)
-    
-    if not request or request[1] != user_id:
-        bot.answer_callback_query(call.id, 'Это не ваша заявка!')
-        return
-    if request[3] != 'new':
-        bot.answer_callback_query(call.id, 'Заявка уже в работе, отменить нельзя.')
-        return
-        
-    db.update_request_status(request_id, 'cancelled', None, None)
-    bot.edit_message_text('❌ Заявка N' + str(request_id) + ' отменена.', call.message.chat.id, call.message.message_id)
-    bot.send_message(user_id, 'Ваша заявка N' + str(request_id) + ' успешно отменена.', reply_markup=get_customer_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('edit_req_'))
-def start_edit_request(call):
-    user_id = call.from_user.id
-    request_id = int(call.data.split('_')[2])
-    request = db.get_request(request_id)
-    
-    if not request or request[1] != user_id:
-        bot.answer_callback_query(call.id, 'Это не ваша заявка!')
-        return
-    if request[3] != 'new':
-        bot.answer_callback_query(call.id, 'Заявка уже в работе, изменить нельзя.')
-        return
-        
-    user_states[user_id] = {'state': 'editing_text', 'request_id': request_id}
-    bot.edit_message_text('✏️ Напишите новый текст для заявки N' + str(request_id) + ' (до 300 символов):', call.message.chat.id, call.message.message_id)
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'editing_text')
-def save_edited_text(message):
-    user_id = message.from_user.id
-    state = user_states[message.from_user.id]
-    request_id = state.get('request_id')
-    text = message.text
-    
-    if len(text) > 300:
-        bot.send_message(message.chat.id, '⚠️ Слишком длинно. Сократите до 300 символов.')
-        return
-    if 'http' in text.lower():
-        bot.send_message(message.chat.id, '❌ Ссылки запрещены.')
-        return
-        
-    db.update_request_text(request_id, text)
-    user_states.pop(user_id, None)
-    bot.send_message(message.chat.id, '✅ Текст заявки N' + str(request_id) + ' обновлен!', reply_markup=get_customer_menu())
-
-# --- Защита от сборщиков (Проверка нагрузки мастера) ---
-
-def check_master_limits(master_id):
-    """Проверяет, может ли мастер принять новый заказ"""
-    requests = db.get_requests_by_master(master_id)
-    active_count = 0
-    for req in requests:
-        if req[3] in ['accepted', 'in_progress']:
-            active_count += 1
-            
-    if active_count >= 3:
-        return False, '⚠️ У вас уже 3 активных заказа. Завершите хотя бы один, прежде чем брать новый.'
-    
-    # Здесь можно добавить проверку по времени (12 часов), если в БД есть точные таймстампы
-    # Для надежности мы используем лимит активных задач, что уже отсекает "сборщиков"
-    return True, ''
-
-# --- Админская команда для сброса зависших заявок ---
-# Если мастер взял заказ и пропал, админ может вернуть его в пул командой /release 123 (где 123 - номер заявки)
-
-@bot.message_handler(commands=['release'])
-def admin_release(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, '⛔ Доступ запрещен.')
-        return
-        
-    args = message.text.split()
-    if len(args) < 2:
-        bot.send_message(message.chat.id, 'Использование: /release [номер_заявки]')
-        return
-        
-    request_id = int(args[1])
-    request = db.get_request(request_id)
-    if not request:
-        bot.send_message(message.chat.id, 'Заявка не найдена.')
-        return
-        
-    db.update_request_status(request_id, 'new', None, None)
-    bot.send_message(message.chat.id, '✅ Заявка N' + str(request_id) + ' возвращена в пул свободных.')
-    
-    # Уведомляем в группу, что заявка снова свободна
-    cat_name = CATEGORIES.get(request[2], {}).get('name', request[2])
-    group_msg = '🔄 Заявка N' + str(request_id) + ' снова доступна!\n\n'
-    group_msg += '📂 ' + cat_name + '\n'
-    group_msg += '📝 ' + request[3]
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton('✅ Принять', callback_data='accept_' + str(request_id)),
-        types.InlineKeyboardButton('⏭️ Пропустить', callback_data='skip_' + str(request_id))
-    )
-    try:
-        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
-    except Exception:
-        pass
-# --- Принятие заявки мастером ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('accept_'))
-def process_accept(call):
-    request_id = int(call.data.split('_')[1])
-    master_id = call.from_user.id
-    master_username = call.from_user.username or call.from_user.first_name
-
-    # 1. Проверка лимитов (Защита от сборщиков)
-    can_accept, limit_msg = check_master_limits(master_id)
-    if not can_accept:
-        bot.answer_callback_query(call.id, limit_msg)
-        bot.send_message(master_id, limit_msg)
-        return
-
-    request = db.get_request(request_id)
-    # request структура: (id, user_id, username, text, category, subcategory, status, ...)
-    if not request or request[6] != 'new':
-        bot.answer_callback_query(call.id, 'Этот заказ уже принят или отменен.')
-        return
-
-    # 2. Обновляем статус в БД
-    db.update_request_status(request_id, 'accepted', master_id, master_username)
-
-    # 3. Обновляем сообщение в группе мастеров
-    cat_name = CATEGORIES.get(request[4], {}).get('name', request[4])
-    subcategory = request[5] if len(request) > 5 else 'Не указана'
-    new_text = '✅ Заказ N' + str(request_id) + ' принят @' + master_username + '\n\n'
-    new_text += '📂 ' + cat_name + ' (' + subcategory + ')\n'
-    new_text += '📝 ' + request[3]
-    
-    try:
-        bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=None)
-    except Exception:
-        pass
-
-    # 4. Отправляем сообщение мастеру с кнопками действий
-    msg_to_master = '🎉 Вы приняли заказ N' + str(request_id) + '!\n\n'
-    msg_to_master += '📂 Категория: ' + cat_name + '\n'
-    msg_to_master += '📝 Задача: ' + request[3] + '\n\n'
-    msg_to_master += 'Свяжитесь с заказчиком, когда будете готовы начать работу.'
-
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('⚙️ В работе', callback_data='progress_' + str(request_id)),
-        types.InlineKeyboardButton('❌ Отказаться', callback_data='cancel_after_' + str(request_id)),
-        types.InlineKeyboardButton('📦 Мои заказы', callback_data='my_orders')
-    )
-    try:
-        bot.send_message(master_id, msg_to_master, reply_markup=markup)
-    except Exception:
-        pass
-
-    # 5. Уведомляем заказчика (request[1] - это user_id заказчика)
-    try:
-        bot.send_message(request[1], '🔔 На вашу заявку N' + str(request_id) + ' откликнулся мастер @' + master_username + '.')
-    except Exception:
-        pass
-    
-    bot.answer_callback_query(call.id, 'Заказ принят!')
-
-# --- Пропуск заявки мастером ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('skip_'))
-def process_skip(call):
-    request_id = int(call.data.split('_')[1])
-    master_username = call.from_user.username or call.from_user.first_name
-    current_text = call.message.text
-    
-    if 'Пропущено:' in current_text:
-        new_text = current_text + ', @' + master_username
-    else:
-        new_text = current_text + '\n\n⏭️ Пропущено: @' + master_username
-        
-    try:
-        bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=call.message.reply_markup)
-    except Exception:
-        pass
-    bot.answer_callback_query(call.id, 'Заявка пропущена.')
-
-# --- Перевод заказа в статус "В работе" ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('progress_'))
-def process_progress(call):
-    request_id = int(call.data.split('_')[1])
-    master_id = call.from_user.id
-    
-    db.update_request_status(request_id, 'in_progress', master_id)
-
-    text = '⚙️ Заказ N' + str(request_id) + ' в работе.\n\nНажмите "Выполнено", когда закончите.'
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('✔️ Выполнено', callback_data='done_' + str(request_id)),
-        types.InlineKeyboardButton('❌ Отказаться', callback_data='cancel_after_' + str(request_id))
-    )
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-    # Уведомляем заказчика
-    request = db.get_request(request_id)
-    try:
-        bot.send_message(request[1], '🔔 Мастер приступил к выполнению заявки N' + str(request_id) + '.')
-    except Exception:
-        pass
-    bot.answer_callback_query(call.id, 'Статус обновлен.')
-# --- Отказ от принятого заказа ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_after_'))
-def process_cancel_after(call):
-    request_id = int(call.data.split('_')[1])
-    request = db.get_request(request_id)
-    if not request or request[7] != call.from_user.id:
-        bot.answer_callback_query(call.id, 'Вы не принимали этот заказ!')
-        return
-        
-    user_states[call.from_user.id] = {'state': 'waiting_for_comment', 'cancel_request_id': request_id}
-    text = '⚠️ Отказ от заказа N' + str(request_id) + '.\n\nНапишите причину отказа (или нажмите Отмена ниже):'
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton('❌ Не отказываться', callback_data='cancel_cancel_' + str(request_id)))
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    bot.answer_callback_query(call.id, 'Введите причину')
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cancel_cancel_'))
-def cancel_cancel(call):
-    user_id = call.from_user.id
-    user_states.pop(user_id, None)
-    request_id = int(call.data.split('_')[2])
-    request = db.get_request(request_id)
-    cat_name = CATEGORIES.get(request[4], {}).get('name', request[4])
-    
-    text = '⚙️ Заказ N' + str(request_id) + '.\n\n📂 ' + cat_name + '\n📝 ' + request[3]
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('⚙️ В работе', callback_data='progress_' + str(request_id)),
-        types.InlineKeyboardButton('❌ Отказаться', callback_data='cancel_after_' + str(request_id))
-    )
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    bot.answer_callback_query(call.id, 'Отказ отменен')
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_comment')
-def process_cancel_comment(message):
-    user_id = message.from_user.id
-    state = user_states.get(user_id, {})
-    request_id = state.get('cancel_request_id')
-    comment = message.text
-    request = db.get_request(request_id)
-    
-    if not request:
-        bot.send_message(message.chat.id, '⚠️ Заявка не найдена.')
-        user_states.pop(user_id, None)
-        return
-        
-    master_username = message.from_user.username or message.from_user.first_name
-    db.update_request_status(request_id, 'new', None, None)
-    
-    cat_name = CATEGORIES.get(request[4], {}).get('name', request[4])
-    group_msg = '🔄 Заявка N' + str(request_id) + ' снова доступна!\n\n'
-    group_msg += '📂 ' + cat_name + '\n'
-    group_msg += '📝 ' + request[3] + '\n\n'
-    group_msg += '⚠️ Отказ от @' + master_username + '\n💬 Причина: ' + comment
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton('✅ Принять', callback_data='accept_' + str(request_id)),
-        types.InlineKeyboardButton('⏭️ Пропустить', callback_data='skip_' + str(request_id))
-    )
-    try:
-        bot.send_message(MASTERS_GROUP_ID, group_msg, reply_markup=markup)
-        bot.send_message(message.chat.id, '✅ Заявка возвращена в пул.', reply_markup=get_master_menu())
-    except Exception:
-        bot.send_message(message.chat.id, '❌ Не удалось опубликовать.')
-    user_states.pop(user_id, None)
-
-# --- Выполнение заказа и оценка ---
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('done_'))
-def process_done(call):
-    request_id = int(call.data.split('_')[1])
-    master_id = call.from_user.id
-    
-    db.update_request_status(request_id, 'done', master_id)
-    request = db.get_request(request_id)
-    
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('⭐ Отлично (5)', callback_data='rate_5_' + str(request_id)),
-        types.InlineKeyboardButton('👎 Плохо (1)', callback_data='rate_1_' + str(request_id))
-    )
-    try:
-        bot.send_message(request[1], '🎉 Заказ N' + str(request_id) + ' выполнен!\n\nПожалуйста, оцените работу мастера:', reply_markup=markup)
-    except Exception:
-        pass
-        
-    bot.edit_message_text('✔️ Заказ N' + str(request_id) + ' выполнен!', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-    bot.answer_callback_query(call.id, 'Заказ завершен')
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
-def process_rating(call):
-    parts = call.data.split('_')
-    rating = int(parts[1])
-    request_id = int(parts[2])
-    request = db.get_request(request_id)
-    executor_id = request[7]
-    
-    db.update_rating(executor_id, rating)
-    bot.edit_message_text('Спасибо за оценку! 🤝', call.message.chat.id, call.message.message_id, reply_markup=get_customer_menu())
-    bot.answer_callback_query(call.id, 'Оценка сохранена')
-# --- Мои заказы мастера ---
-
-@bot.callback_query_handler(func=lambda call: call.data == 'my_orders')
-def my_orders(call):
-    master_id = call.from_user.id
-    requests = db.get_requests_by_master(master_id)
-    
-    if not requests:
-        bot.edit_message_text('📦 У вас пока нет заказов.', call.message.chat.id, call.message.message_id, reply_markup=get_master_menu())
-        return
-    
-    # Группируем по статусам
-    active = []
-    done = []
-    cancelled = []
-    
-    for req in requests:
-        req_id = req[0]
-        text = req[3]
-        category = req[4]
-        status = req[6]
-        status_emoji = STATUS_EMOJI.get(status, '❓')
-        cat_name = CATEGORIES.get(category, {}).get('name', category)
-        
-        if len(text) > 50:
-            short_text = text[:50] + '...'
-        else:
-            short_text = text
-            
-        line = status_emoji + ' N' + str(req_id) + ' - ' + cat_name + '\n  ' + short_text
-        
-        if status in ['accepted', 'in_progress']:
-            active.append(line)
-        elif status == 'done':
-            done.append(line)
-        elif status == 'cancelled':
-            cancelled.append(line)
-    
-    result = '📦 Ваши заказы:\n\n'
-    
-    if active:
-        result += '🔹 АКТИВНЫЕ:\n' + '\n'.join(active) + '\n\n'
-    if done:
-        result += '✔️ ВЫПОЛНЕННЫЕ:\n' + '\n'.join(done) + '\n\n'
-    if cancelled:
-        result += '❌ ОТМЕНЕННЫЕ:\n' + '\n'.join(cancelled) + '\n\n'
-    
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton('🏠 ЖК (Главная)', callback_data='home'),
-        types.InlineKeyboardButton('⚙️ Изменить категории', callback_data='can_help')
-    )
-    
-    bot.edit_message_text(result, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        captcha_answers[uid]['attempts'] += 1
+        if captcha_answers[uid]['attempts'] >= 3:
+            bot.send_message(call.message.chat.id, 'Много ошибок, попробуйте позже'); del captcha_answers[uid]
+        else: bot.send_message(call.message.chat.id, 'Неверно, ещё раз')
     bot.answer_callback_query(call.id)
 
-# --- Жалоба на мастера (упрощенная версия) ---
+@bot.callback_query_handler(func=lambda c: c.data == 'home')
+def process_home(call):
+    user_states.pop(call.from_user.id, None)
+    bot.send_message(call.message.chat.id, '.', reply_markup=types.ReplyKeyboardRemove())
+    safe_edit(call, '🏠 Главная', get_main_menu())
+    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('complain_'))
-def process_complain(call):
-    request_id = int(call.data.split('_')[1])
-    user_id = call.from_user.id
-    
-    request = db.get_request(request_id)
-    if not request or request[1] != user_id:
-        bot.answer_callback_query(call.id, 'Это не ваша заявка!')
-        return
-    
-    user_states[user_id] = {'state': 'waiting_for_complaint', 'request_id': request_id}
-    bot.edit_message_text('⚠️ Опишите причину жалобы на мастера. Администратор ЖК рассмотрит её в течение 24 часов.', call.message.chat.id, call.message.message_id)
-    bot.answer_callback_query(call.id, 'Введите жалобу')
+@bot.callback_query_handler(func=lambda c: c.data == 'info')
+def show_info(call):
+    t = '🏘️ Сервис взаимопомощи соседей.\n\n1️⃣ Создайте заявку\n2️⃣ Мастера увидят её в группе\n3️⃣ Первый откликнувшийся получает ваш контакт\n4️⃣ Оцените работу после выполнения\n\n⚠️ Максимум 3 активные заявки.'
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    safe_edit(call, t, m)
+    bot.answer_callback_query(call.id)
 
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id, {}).get('state') == 'waiting_for_complaint')
-def save_complaint(message):
-    user_id = message.from_user.id
-    state = user_states[message.from_user.id]
-    request_id = state.get('request_id')
-    complaint_text = message.text
-    
-    if len(complaint_text) < 10:
-        bot.send_message(message.chat.id, '⚠️ Опишите жалобу подробнее (минимум 10 символов).')
-        return
-    
-    # Сохраняем жалобу в БД (если есть метод) или отправляем админу
-    try:
-        admin_msg = '🚨 ЖАЛОБА!\n\n'
-        admin_msg += 'Заявка N' + str(request_id) + '\n'
-        admin_msg += 'От: @' + (message.from_user.username or message.from_user.first_name) + '\n'
-        admin_msg += 'Текст: ' + complaint_text
-        
-        bot.send_message(ADMIN_ID, admin_msg)
-        bot.send_message(message.chat.id, '✅ Жалоба отправлена администратору ЖК. Мы рассмотрим её в течение 24 часов.', reply_markup=get_customer_menu())
-    except Exception:
-        bot.send_message(message.chat.id, '❌ Не удалось отправить жалобу. Попробуйте позже.', reply_markup=get_customer_menu())
-    
-    user_states.pop(user_id, None)
+@bot.callback_query_handler(func=lambda c: c.data == 'need_help')
+def need_help(call):
+    user_states[call.from_user.id] = {'state': 'waiting_for_category'}
+    m = types.InlineKeyboardMarkup(row_width=1)
+    for k, v in CATEGORIES.items(): m.add(types.InlineKeyboardButton(v['name'], callback_data='cat_' + k))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    safe_edit(call, '📝 Выберите категорию:', m)
+    bot.answer_callback_query(call.id)
 
-# --- Обработчик для всех неактивных кнопок ---
+@bot.callback_query_handler(func=lambda c: c.data.startswith('cat_'))
+def pick_cat(call):
+    uid = call.from_user.id
+    if user_states.get(uid, {}).get('state') != 'waiting_for_category':
+        bot.answer_callback_query(call.id); return
+    cat = call.data.split('_', 1)[1]
+    subs = CATEGORIES[cat]['sub']
+    if not subs:
+        user_states[uid] = {'state': 'waiting_for_text', 'category': cat, 'subcategory': 'Другое'}
+        safe_edit(call, '📝 Опишите задачу (до 300 символов):\nКатегория: ' + CATEGORIES[cat]['name'])
+    else:
+        user_states[uid] = {'state': 'waiting_for_subcategory', 'category': cat}
+        m = types.InlineKeyboardMarkup(row_width=1)
+        for s in subs: m.add(types.InlineKeyboardButton(s, callback_data='sub_' + cat + '_' + s))
+        m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='need_help'))
+        safe_edit(call, '📝 ' + CATEGORIES[cat]['name'] + '\nВыберите подкатегорию:', m)
+    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda c: c.data.startswith('sub_'))
+def pick_sub(call):
+    uid = call.from_user.id
+    if user_states.get(uid, {}).get('state') != 'waiting_for_subcategory':
+        bot.answer_callback_query(call.id); return
+    parts = call.data.split('_', 2)
+    user_states[uid] = {'state': 'waiting_for_text', 'category': parts[1], 'subcategory': parts[2]}
+    safe_edit(call, '📝 Опишите задачу (до 300 символов):\n' + CATEGORIES[parts[1]]['name'] + ' - ' + parts[2])
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get('state') == 'waiting_for_text')
+def get_text(message):
+    if len(message.text) > 300:
+        bot.send_message(message.chat.id, '⚠️ Максимум 300 символов.'); return
+    if 'http' in message.text.lower() or any(w in message.text.lower() for w in SPAM_WORDS):
+        bot.send_message(message.chat.id, '❌ Ссылки и спам запрещены.'); return
+    user_states[message.from_user.id].update({'text': message.text, 'state': 'waiting_for_timing'})
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('⚡ Срочно', callback_data='time_urgent'))
+    m.add(types.InlineKeyboardButton('📅 Укажу время', callback_data='time_custom'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='back_to_text'))
+    bot.send_message(message.chat.id, '⏰ Когда нужно выполнить?', reply_markup=m)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'back_to_text')
+def back_to_text(call):
+    user_states[call.from_user.id]['state'] = 'waiting_for_text'
+    bot.send_message(call.message.chat.id, '✏️ Напишите новый текст задачи:')
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data in ['time_urgent', 'time_custom'])
+def pick_time(call):
+    uid = call.from_user.id
+    if user_states.get(uid, {}).get('state') != 'waiting_for_timing':
+        bot.answer_callback_query(call.id); return
+    if call.data == 'time_urgent':
+        user_states[uid].update({'timing': '⚡ Срочно', 'state': 'waiting_for_contact'})
+        ask_contact(call.message)
+    else:
+        user_states[uid]['state'] = 'waiting_for_custom_time'
+        safe_edit(call, '📅 Напишите дату и время (например: завтра в 18:00):')
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get('state') == 'waiting_for_custom_time')
+def get_custom_time(message):
+    if len(message.text) > 50:
+        bot.send_message(message.chat.id, '⚠️ Слишком длинно.'); return
+    user_states[message.from_user.id].update({'timing': '📅 ' + message.text, 'state': 'waiting_for_contact'})
+    ask_contact(message)
+
+def ask_contact(message):
+    m = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    m.add(types.KeyboardButton('📱 Поделиться контактом', request_contact=True))
+    m.add(types.KeyboardButton('◀️ Назад'))
+    bot.send_message(message.chat.id, '📱 Поделитесь контактом для связи с мастером:', reply_markup=m)
+
+@bot.message_handler(func=lambda m: m.text == '◀️ Назад' and user_states.get(m.from_user.id, {}).get('state') == 'waiting_for_contact')
+def back_from_contact(message):
+    user_states[message.from_user.id]['state'] = 'waiting_for_timing'
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('⚡ Срочно', callback_data='time_urgent'))
+    m.add(types.InlineKeyboardButton('📅 Укажу время', callback_data='time_custom'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='back_to_text'))
+    bot.send_message(message.chat.id, '⏰ Когда нужно выполнить?', reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(message.chat.id, 'Выберите время:', reply_markup=m)
+
+@bot.message_handler(content_types=['contact'])
+def get_contact(message):
+    uid = message.from_user.id
+    state = user_states.get(uid, {})
+    if state.get('state') != 'waiting_for_contact': return
+    contact = message.contact.phone_number if message.contact else None
+    active = sum(1 for r in db.get_requests_by_user(uid) if r['status'] in ['new', 'accepted', 'in_progress'])
+    if active >= 3:
+        bot.send_message(message.chat.id, '⚠️ У вас уже 3 активные заявки.', reply_markup=types.ReplyKeyboardRemove())
+        user_states.pop(uid, None); return
+    rid = db.save_request(uid, message.from_user.username or message.from_user.first_name,
+                          state['text'], state['category'], state['subcategory'], state.get('timing', 'Не указано'), contact)
+    cat_name = CATEGORIES.get(state['category'], {}).get('name', state['category'])
+    gm = '🆕 Заявка №' + str(rid) + '\n📂 ' + cat_name + ' (' + state['subcategory'] + ')\n⏰ ' + state.get('timing', 'Не указано') + '\n📝 ' + state['text']
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton('✅ Принять', callback_data='accept_' + str(rid)))
+    m.add(types.InlineKeyboardButton('⏭️ Пропустить', callback_data='skip_' + str(rid)))
+    try: bot.send_message(MASTERS_GROUP_ID, gm, reply_markup=m)
+    except Exception as e: print('Group err:', e)
+    bot.send_message(message.chat.id, '✅ Заявка №' + str(rid) + ' передана мастерам!', reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(message.chat.id, 'Что дальше?', reply_markup=get_main_menu())
+    user_states.pop(uid, None)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'my_requests_menu')
+def my_req_menu(call):
+    db.archive_old_requests()
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('🟢 Активные', callback_data='my_req_active'))
+    m.add(types.InlineKeyboardButton('⚪ Архив', callback_data='my_req_archive'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    safe_edit(call, '📋 Выберите раздел:', m)
+    bot.answer_callback_query(call.id)
+
+def build_requests_view(uid, statuses):
+    cust = [r for r in db.get_requests_by_user(uid) if r['status'] in statuses]
+    mast = [r for r in db.get_requests_by_master(uid) if r['status'] in statuses]
+    lines, m = [], types.InlineKeyboardMarkup(row_width=2)
+    if cust:
+        lines.append('🔹 ВЫ ЗАКАЗЧИК:')
+        for r in cust:
+            cn = CATEGORIES.get(r['category'], {}).get('name', r['category'])
+            lines.append(STATUS_EMOJI.get(r['status'], '❓') + ' №' + str(r['id']) + ' | ' + cn + ' | ' + r['text'][:30])
+            if r['status'] == 'new':
+                m.add(types.InlineKeyboardButton('✏️ Редактировать ' + str(r['id']), callback_data='edit_req_' + str(r['id'])),
+                      types.InlineKeyboardButton('❌ Отменить ' + str(r['id']), callback_data='cancel_req_' + str(r['id'])))
+            elif r['status'] == 'accepted':
+                m.add(types.InlineKeyboardButton('❌ Отменить ' + str(r['id']), callback_data='cancel_req_' + str(r['id'])))
+    if mast:
+        lines.append('\n🔹 ВЫ МАСТЕР:')
+        for r in mast:
+            cn = CATEGORIES.get(r['category'], {}).get('name', r['category'])
+            lines.append(STATUS_EMOJI.get(r['status'], '❓') + ' №' + str(r['id']) + ' | ' + cn + ' | ' + r['text'][:30])
+            if r['status'] == 'accepted':
+                m.add(types.InlineKeyboardButton('⚙️ В работу ' + str(r['id']), callback_data='progress_' + str(r['id'])),
+                      types.InlineKeyboardButton('❌ Отказаться ' + str(r['id']), callback_data='cancel_after_' + str(r['id'])))
+            elif r['status'] == 'in_progress':
+                m.add(types.InlineKeyboardButton('✔️ Готово ' + str(r['id']), callback_data='confirm_done_' + str(r['id'])),
+                      types.InlineKeyboardButton('❌ Отказаться ' + str(r['id']), callback_data='cancel_after_' + str(r['id'])))
+    if not lines: return '📭 Пусто', None
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='my_requests_menu'))
+    m.add(types.InlineKeyboardButton('🏠 Главная', callback_data='home'))
+    return '\n'.join(lines), m
+
+@bot.callback_query_handler(func=lambda c: c.data in ['my_req_active', 'my_req_archive'])
+def show_req_list(call):
+    st = ['new', 'accepted', 'in_progress'] if call.data == 'my_req_active' else ['done', 'cancelled', 'archived']
+    text, m = build_requests_view(call.from_user.id, st)
+    safe_edit(call, text, m)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'master_settings')
+def master_settings(call):
+    safe_edit(call, '🛠️ Я могу помочь', get_master_settings_menu(db.get_user(call.from_user.id)))
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'unsubscribe_master')
+def unsub_master(call):
+    db.unsubscribe_master(call.from_user.id)
+    safe_edit(call, '🚫 Вы отписаны от рассылок мастеров.', get_main_menu())
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'edit_cats')
+def edit_cats(call):
+    user = db.get_user(call.from_user.id)
+    sel = user.get('categories', []) if user and user['role'] == 'master' else []
+    user_states[call.from_user.id] = {'state': 'waiting_for_categories', 'selected': sel}
+    update_cats_keyboard(call.message, sel)
+    bot.answer_callback_query(call.id)
+
+def update_cats_keyboard(message, selected):
+    m = types.InlineKeyboardMarkup(row_width=1)
+    for k, v in CATEGORIES.items():
+        label = '✅ ' + v['name'] if k in selected else '⭕ ' + v['name']
+        m.add(types.InlineKeyboardButton(label, callback_data='toggle_' + k))
+    m.add(types.InlineKeyboardButton('✔️ Готово', callback_data='finish_cats'))
+    if selected: m.add(types.InlineKeyboardButton('🔄 Сбросить', callback_data='reset_cats'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='master_settings'))
+    names = ', '.join(CATEGORIES[c]['name'] for c in selected) if selected else 'ничего'
+    t = '🛠️ Выберите категории:\nВыбрано: ' + names
+    try: bot.edit_message_text(t, message.chat.id, message.message_id, reply_markup=m)
+    except: bot.send_message(message.chat.id, t, reply_markup=m)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('toggle_'))
+def toggle_cat(call):
+    uid = call.from_user.id
+    if user_states.get(uid, {}).get('state') != 'waiting_for_categories':
+        bot.answer_callback_query(call.id); return
+    cat = call.data.split('_', 1)[1]
+    sel = user_states[uid]['selected']
+    if cat in sel: sel.remove(cat)
+    else: sel.append(cat)
+    update_cats_keyboard(call.message, sel)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'reset_cats')
+def reset_cats(call):
+    uid = call.from_user.id
+    if user_states.get(uid, {}).get('state') != 'waiting_for_categories':
+        bot.answer_callback_query(call.id); return
+    user_states[uid]['selected'] = []
+    update_cats_keyboard(call.message, [])
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == 'finish_cats')
+def finish_cats(call):
+    uid = call.from_user.id
+    state = user_states.get(uid, {})
+    if state.get('state') != 'waiting_for_categories':
+        bot.answer_callback_query(call.id); return
+    sel = state.get('selected', [])
+    if not sel:
+        bot.send_message(call.message.chat.id, '⚠️ Выберите хотя бы одну категорию!')
+        bot.answer_callback_query(call.id); return
+    db.save_user(uid, call.from_user.username or call.from_user.first_name, 'master', sel)
+    safe_edit(call, '✅ Вы зарегистрированы как мастер!', get_main_menu())
+    user_states.pop(uid, None)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('accept_'))
+def accept_req(call):
+    rid = int(call.data.split('_')[1])
+    mid = call.from_user.id
+    mun = call.from_user.username or call.from_user.first_name
+    active = sum(1 for r in db.get_requests_by_master(mid) if r['status'] in ['accepted', 'in_progress'])
+    if active >= 3:
+        bot.answer_callback_query(call.id, '⚠️ Лимит 3 активных заказа!'); return
+    req = db.get_request(rid)
+    if not req or req['status'] != 'new':
+        bot.answer_callback_query(call.id, 'Уже неактивна'); return
+    db.update_request_status(rid, 'accepted', mid, mun)
+    try: bot.send_message(req['user_id'], '🔔 Вашу заявку №' + str(rid) + ' принял мастер @' + mun)
+    except: pass
+    cn = CATEGORIES.get(req['category'], {}).get('name', req['category'])
+    msg = '🎉 Вы приняли заказ №' + str(rid) + '!\n📂 ' + cn + '\n📝 ' + req['text'] + '\n⏰ ' + str(req.get('timing', 'Не указано'))
+    msg += '\n📞 Контакт: +' + str(req.get('contact', 'не указан'))
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('⚙️ В работу', callback_data='progress_' + str(rid)))
+    m.add(types.InlineKeyboardButton('❌ Отказаться', callback_data='cancel_after_' + str(rid)))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    bot.send_message(mid, msg, reply_markup=m)
+    try: bot.edit_message_text('✅ Заказ №' + str(rid) + ' принят @' + mun, call.message.chat.id, call.message.message_id, reply_markup=None)
+    except: pass
+    bot.answer_callback_query(call.id, 'Заказ принят!')
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('progress_'))
+def progress_req(call):
+    rid = int(call.data.split('_')[1])
+    db.update_request_status(rid, 'in_progress')
+    req = db.get_request(rid)
+    try: bot.send_message(req['user_id'], '🔔 Мастер приступил к заявке №' + str(rid))
+    except: pass
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('✔️ Готово', callback_data='confirm_done_' + str(rid)))
+    m.add(types.InlineKeyboardButton('❌ Отказаться', callback_data='cancel_after_' + str(rid)))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    safe_edit(call, '⚙️ Заказ №' + str(rid) + ' в работе.', m)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('confirm_done_'))
+def confirm_done(call):
+    rid = int(call.data.split('_')[2])
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('✅ Да, завершить', callback_data='do_done_' + str(rid)))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='progress_' + str(rid)))
+    safe_edit(call, '⚠️ Уверены, что работа выполнена?', m)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('do_done_'))
+def do_done(call):
+    rid = int(call.data.split('_')[2])
+    db.update_request_status(rid, 'done')
+    req = db.get_request(rid)
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton('⭐ Отлично (5)', callback_data='rate_5_' + str(rid)))
+    m.add(types.InlineKeyboardButton('👎 Плохо (1)', callback_data='rate_1_' + str(rid)))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='home'))
+    try: bot.send_message(req['user_id'], '🎉 Заказ №' + str(rid) + ' выполнен! Оцените мастера:', reply_markup=m)
+    except: pass
+    safe_edit(call, '✔️ Заказ №' + str(rid) + ' завершён!', get_main_menu())
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('rate_'))
+def rate_req(call):
+    p = call.data.split('_')
+    req = db.get_request(int(p[2]))
+    if req and req.get('master_id'): db.update_rating(req['master_id'], int(p[1]))
+    safe_edit(call, 'Спасибо за оценку! 🤝', get_main_menu())
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('cancel_after_'))
+def cancel_after(call):
+    rid = int(call.data.split('_')[2])
+    user_states[call.from_user.id] = {'state': 'waiting_for_comment', 'rid': rid}
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='progress_' + str(rid)))
+    safe_edit(call, '⚠️ Напишите причину отказа:', m)
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get('state') == 'waiting_for_comment')
+def get_cancel_comment(message):
+    uid = message.from_user.id
+    rid = user_states[uid]['rid']
+    req = db.get_request(rid)
+    db.update_request_status(rid, 'new', None, None)
+    mun = message.from_user.username or message.from_user.first_name
+    cn = CATEGORIES.get(req['category'], {}).get('name', req['category'])
+    gm = '🔄 Заявка №' + str(rid) + ' снова доступна!\n📂 ' + cn + '\n📝 ' + req['text'] + '\n⚠️ Отказ от @' + mun + ': ' + message.text
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton('✅ Принять', callback_data='accept_' + str(rid)))
+    m.add(types.InlineKeyboardButton('⏭️ Пропустить', callback_data='skip_' + str(rid)))
+    try: bot.send_message(MASTERS_GROUP_ID, gm, reply_markup=m)
+    except: pass
+    try: bot.send_message(req['user_id'], '⚠️ Мастер отказался от заявки №' + str(rid) + '. Она снова в поиске.')
+    except: pass
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton('🏠 Главная', callback_data='home'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='my_req_active'))
+    bot.send_message(message.chat.id, '✅ Заявка возвращена в пул.', reply_markup=m)
+    user_states.pop(uid, None)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('cancel_req_'))
+def cancel_req_customer(call):
+    rid = int(call.data.split('_')[2])
+    req = db.get_request(rid)
+    if not req or req['user_id'] != call.from_user.id:
+        bot.answer_callback_query(call.id, 'Не ваша заявка'); return
+    if req['status'] not in ['new', 'accepted']:
+        bot.answer_callback_query(call.id, 'Нельзя отменить'); return
+    user_states[call.from_user.id] = {'state': 'waiting_for_cancel_comment', 'rid': rid}
+    safe_edit(call, '⚠️ Напишите причину отмены заявки №' + str(rid) + ':')
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get('state') == 'waiting_for_cancel_comment')
+def get_cancel_comment_customer(message):
+    uid = message.from_user.id
+    rid = user_states[uid]['rid']
+    req = db.get_request(rid)
+    db.update_request_status(rid, 'cancelled', None, None)
+    if req.get('master_id'):
+        try: bot.send_message(req['master_id'], '⚠️ Заказчик отменил заявку №' + str(rid) + '. Причина: ' + message.text)
+        except: pass
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton('🏠 Главная', callback_data='home'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='my_req_active'))
+    bot.send_message(message.chat.id, '❌ Заявка №' + str(rid) + ' отменена.', reply_markup=m)
+    user_states.pop(uid, None)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('do_cancel_'))
+def do_cancel(call):
+    rid = int(call.data.split('_')[2])
+    req = db.get_request(rid)
+    db.update_request_status(rid, 'cancelled', None, None)
+    if req.get('master_id'):
+        try: bot.send_message(req['master_id'], '⚠️ Заказчик отменил заявку №' + str(rid))
+        except: pass
+    safe_edit(call, '❌ Заявка №' + str(rid) + ' отменена.', get_main_menu())
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('edit_req_'))
+def edit_req(call):
+    rid = int(call.data.split('_')[2])
+    req = db.get_request(rid)
+    if not req or req['user_id'] != call.from_user.id:
+        bot.answer_callback_query(call.id, 'Не ваша'); return
+    if req['status'] != 'new':
+        bot.answer_callback_query(call.id, 'Только новые заявки'); return
+    user_states[call.from_user.id] = {'state': 'editing_text', 'rid': rid}
+    safe_edit(call, '✏️ Новый текст (до 300 символов):')
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get('state') == 'editing_text')
+def save_edited_text(message):
+    uid = message.from_user.id
+    rid = user_states[uid]['rid']
+    if len(message.text) > 300:
+        bot.send_message(message.chat.id, '⚠️ Длинно.'); return
+    req = db.get_request(rid)
+    db.update_request_text(rid, message.text)
+    if req.get('master_id'):
+        try: bot.send_message(req['master_id'], '⚠️ Заказчик изменил заявку №' + str(rid) + ':\n' + message.text)
+        except: pass
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton('🏠 Главная', callback_data='home'))
+    m.add(types.InlineKeyboardButton('◀️ Назад', callback_data='my_req_active'))
+    bot.send_message(message.chat.id, '✅ Текст обновлён!', reply_markup=m)
+    user_states.pop(uid, None)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('skip_'))
+def skip_req(call):
+    mun = call.from_user.username or call.from_user.first_name
+    nt = call.message.text + '\n⏭️ Пропущено: @' + mun
+    try: bot.edit_message_text(nt, call.message.chat.id, call.message.message_id, reply_markup=call.message.reply_markup)
+    except: pass
+    bot.answer_callback_query(call.id, 'Пропущено')
+
+@bot.callback_query_handler(func=lambda c: True)
 def catch_all(call):
     bot.answer_callback_query(call.id, '⚠️ Кнопка неактивна')
-# --- ЗАПУСК БОТА ---
 
-print('🚀 Бот взаимопомощи ЖК запущен!')
-print('📱 Ожидание сообщений...')
+print('🚀 Бот запущен!')
 bot.infinity_polling()
